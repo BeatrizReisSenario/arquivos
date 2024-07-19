@@ -1,0 +1,47 @@
+import unittest
+
+class GenericException(Exception):
+    def __init__(self, message, ex=None):
+        self.message = message
+        if ex:
+            self.ex = ex
+        else:
+            self.ex = Exception(message)
+
+class ClientAWSException(GenericException):
+    pass
+
+class TestGenericException(unittest.TestCase):
+    def test_generic_exception_without_ex(self):
+        message = "This is a test message"
+        exception = GenericException(message)
+        self.assertEqual(exception.message, message)
+        self.assertIsInstance(exception.ex, Exception)
+        self.assertEqual(str(exception.ex), message)
+
+    def test_generic_exception_with_ex(self):
+        message = "This is a test message"
+        original_exception = ValueError("Original exception message")
+        exception = GenericException(message, ex=original_exception)
+        self.assertEqual(exception.message, message)
+        self.assertEqual(exception.ex, original_exception)
+
+class TestClientAWSException(unittest.TestCase):
+    def test_client_aws_exception_inherits_generic_exception(self):
+        message = "This is a test message"
+        exception = ClientAWSException(message)
+        self.assertIsInstance(exception, ClientAWSException)
+        self.assertIsInstance(exception, GenericException)
+        self.assertEqual(exception.message, message)
+        self.assertIsInstance(exception.ex, Exception)
+        self.assertEqual(str(exception.ex), message)
+
+    def test_client_aws_exception_with_ex(self):
+        message = "This is a test message"
+        original_exception = ValueError("Original exception message")
+        exception = ClientAWSException(message, ex=original_exception)
+        self.assertEqual(exception.message, message)
+        self.assertEqual(exception.ex, original_exception)
+
+if __name__ == '__main__':
+    unittest.main()
