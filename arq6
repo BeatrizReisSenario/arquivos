@@ -1,0 +1,141 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from src.dynamodb import DynamoDB, DynamoOps  # Substitua 'src.dynamodb' pelo caminho real do seu módulo
+from botocore.exceptions import ClientError
+
+
+class TestDynamoDB(unittest.TestCase):
+
+    @patch('boto3.resource')
+    def setUp(self, mock_boto_resource):
+        self.mock_boto_resource = mock_boto_resource
+        self.mock_dynamodb = mock_boto_resource.return_value
+        self.dynamo_db = DynamoDB()
+
+    def test_get_table(self):
+        # Arrange
+        table_name = 'test-table'
+        mock_table = MagicMock()
+        self.mock_dynamodb.Table.return_value = mock_table
+
+        # Act
+        table = self.dynamo_db.get_table(table_name)
+
+        # Assert
+        self.mock_dynamodb.Table.assert_called_once_with(table_name)
+        self.assertEqual(table, mock_table)
+
+    def test_query_table(self):
+        # Arrange
+        table_name = 'test-table'
+        query_value = 'test-value'
+        mock_table = MagicMock()
+        self.dynamo_db.get_table = MagicMock(return_value=mock_table)
+        mock_key_condition_expression_method = MagicMock()
+        with patch('boto3.dynamodb.conditions.Key.eq', return_value=mock_key_condition_expression_method):
+            # Act
+            result = self.dynamo_db.query_table(table_name, query_value)
+
+        # Assert
+        mock_table.query.assert_called_once_with(KeyConditionExpression=mock_key_condition_expression_method)
+        self.assertEqual(result, mock_table.query.return_value)
+
+    def test_get(self):
+        # Arrange
+        table_name = 'test-table'
+        query_keys = {'id': 'test-id'}
+        mock_table = MagicMock()
+        self.dynamo_db.get_table = MagicMock(return_value=mock_table)
+
+        # Act
+        response = self.dynamo_db.get(table_name, query_keys)
+
+        # Assert
+        mock_table.get_item.assert_called_once_with(Key=query_keys)
+        self.assertEqual(response, mock_table.get_item.return_value)
+
+    def test_insert(self):
+        # Arrange
+        table_name = 'test-table'
+        item = {'id': 'test-id', 'value': 'test-value'}
+        mock_table = MagicMock()
+        self.dynamo_db.get_table = MagicMock(return_value=mock_table)
+
+        # Act
+        response = self.dynamo_db.insert(table_name, item)
+
+        # Assert
+        mock_table.put_item.assert_called_once_with(Item=item)
+        self.assertEqual(response, mock_table.put_item.return_value)
+
+
+class TestDynamoOps(unittest.TestCase):
+
+    @patch('boto3.resource')
+    def setUp(self, mock_boto_resource):
+        self.mock_boto_resource = mock_boto_resource
+        self.mock_dynamodb = mock_boto_resource.return_value
+        self.dynamo_ops = DynamoOps(table_name='test-table')
+
+    def test_get(self):
+        # Arrange
+        query_keys = {'id': 'test-id'}
+        mock_table = MagicMock()
+        self.dynamo_ops.table = mock_table
+
+        # Act
+        response = self.dynamo_ops.get(query_keys)
+
+        # Assert
+        mock_table.get_item.assert_called_once_with(Key=query_keys)
+        self.assertEqual(response, mock_table.get_item.return_value)
+
+    def test_insert(self):
+        # Arrange
+        new_item = {'id': 'test-id', 'value': 'test-value'}
+        mock_table = MagicMock()
+        self.dynamo_ops.table = mock_table
+
+        # Act
+        response = self.dynamo_ops.insert(new_item)
+
+        # Assert
+        mock_table.put_item.assert_called_once_with(Item=new_item)
+        self.assertEqual(response, mock_table.put_item.return_value)
+
+    @patch('configuration.log_config.logging.error')
+    def test_update(self, mock_logging_error):
+        # Arrange
+        query_keys = {'id': 'test-id'}
+        updated_items = {'value': 'updated-value'}
+        conditions = {'value': ('attribute_exists', '=', 'old-value')}
+        mock_table = MagicMock()
+        self.dynamo_ops.table = mock_table
+        mock_table.update_item.side_effect = ClientError(
+            {'Error': {'Code': 'ConditionalCheckFailedException'}}, 'update_item')
+
+        # Act
+        response = self.dynamo_ops.update(query_keys, updated_items, conditions)
+
+        # Assert
+        mock_logging_error.assert_called_once()
+        self.assertIsNone(response)
+
+    def test_scan_filter(self):
+        # Arrange
+        table_key = 'id'
+        scan_value = 'test-id'
+        scan_type = 'eq'
+        mock_table = MagicMock()
+        self.dynamo_ops.table = mock_table
+
+        # Act
+        response = self.dynamo_ops.scan_filter(table_key, scan_value, scan_type)
+
+        # Assert
+        mock_table.query.assert_called_once()
+        self.assertEqual(response, mock_table.query.return_value.get("Items", []))
+
+
+if __name__ == '__main__':
+    unittest.main()
