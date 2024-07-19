@@ -1,0 +1,106 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from botocore.exceptions import ClientError
+from src.exceptions import ClientAWSException
+from your_module import upload_file, create_presigned_url  # Substitua 'your_module' pelo nome real do seu módulo
+
+class TestS3Functions(unittest.TestCase):
+
+    @patch('your_module.s3_resource')
+    def test_upload_file_success(self, mock_s3_resource):
+        # Arrange
+        mock_bucket = MagicMock()
+        mock_s3_resource.Bucket.return_value = mock_bucket
+        data_string = "test data"
+        bucket = "test-bucket"
+        key = "test-key"
+
+        # Act
+        upload_file(data_string, bucket, key)
+
+        # Assert
+        mock_bucket.put_object.assert_called_once_with(Key=key, Body=data_string)
+
+    @patch('your_module.s3_resource')
+    def test_upload_file_client_error(self, mock_s3_resource):
+        # Arrange
+        mock_bucket = MagicMock()
+        mock_s3_resource.Bucket.return_value = mock_bucket
+        mock_bucket.put_object.side_effect = ClientError(
+            {"Error": {"Code": "500", "Message": "Internal Server Error"}},
+            "put_object"
+        )
+        data_string = "test data"
+        bucket = "test-bucket"
+        key = "test-key"
+
+        # Act & Assert
+        with self.assertRaises(ClientAWSException) as context:
+            upload_file(data_string, bucket, key)
+        self.assertIn(f'Erro ao realizar upload do arquivo "{bucket}/{key}"', str(context.exception))
+
+    @patch('your_module.s3_resource')
+    def test_upload_file_general_exception(self, mock_s3_resource):
+        # Arrange
+        mock_bucket = MagicMock()
+        mock_s3_resource.Bucket.return_value = mock_bucket
+        mock_bucket.put_object.side_effect = Exception("General Exception")
+        data_string = "test data"
+        bucket = "test-bucket"
+        key = "test-key"
+
+        # Act & Assert
+        with self.assertRaises(Exception) as context:
+            upload_file(data_string, bucket, key)
+        self.assertIn("General Exception", str(context.exception))
+
+    @patch('your_module.s3_client')
+    def test_create_presigned_url_success(self, mock_s3_client):
+        # Arrange
+        mock_s3_client.generate_presigned_url.return_value = "http://presigned.url"
+        bucket_name = "test-bucket"
+        object_name = "test-object"
+        expiration = 180
+
+        # Act
+        url = create_presigned_url(bucket_name, object_name, expiration)
+
+        # Assert
+        self.assertEqual(url, "http://presigned.url")
+        mock_s3_client.generate_presigned_url.assert_called_once_with(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': object_name},
+            ExpiresIn=expiration
+        )
+
+    @patch('your_module.s3_client')
+    def test_create_presigned_url_client_error(self, mock_s3_client):
+        # Arrange
+        mock_s3_client.generate_presigned_url.side_effect = ClientError(
+            {"Error": {"Code": "500", "Message": "Internal Server Error"}},
+            "generate_presigned_url"
+        )
+        bucket_name = "test-bucket"
+        object_name = "test-object"
+        expiration = 180
+
+        # Act & Assert
+        with self.assertRaises(ClientAWSException) as context:
+            create_presigned_url(bucket_name, object_name, expiration)
+        self.assertIn(f'Erro ao criar url "{bucket_name}/{object_name}"', str(context.exception))
+
+    @patch('your_module.s3_client')
+    def test_create_presigned_url_general_exception(self, mock_s3_client):
+        # Arrange
+        mock_s3_client.generate_presigned_url.side_effect = Exception("General Exception")
+        bucket_name = "test-bucket"
+        object_name = "test-object"
+        expiration = 180
+
+        # Act & Assert
+        with self.assertRaises(RuntimeError) as context:
+            create_presigned_url(bucket_name, object_name, expiration)
+        self.assertIn("General Exception", str(context.exception))
+
+if __name__ == '__main__':
+    unittest.main()
