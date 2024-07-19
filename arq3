@@ -1,0 +1,193 @@
+import uuid
+import pandas as pd
+import logging
+
+
+def validate(athenadict: dict, cenario: dict, response: dict):
+    dffound = None
+    response_validation = {}
+    for linha in response:
+        if linha['INFO'] == 'Entrada encontrada em Athena':
+            if dffound is None:
+                dffound = pd.DataFrame(linha['Dados do evento'])
+            else:
+                dffound = dffound.append(pd.DataFrame(linha['Dados do evento']))
+
+    if dffound is not None:
+        rows = dffound.shape[0]
+    else:
+        return f"Nao foi encontrado nenhum registro no Athena para este cenario: {cenario}"
+
+    lista_cenario = []
+    for values in cenario['transaction_types']:
+        tt_values = None
+        cenario_key = 'cenario'
+        response_validation[cenario_key] = []
+        tts = len(cenario['transaction_types'])
+
+        if rows > tts:
+            transactiontype = {
+                "Status": f"""ERRO: Transtype além do esperado para o cenário.Quantidade dessa transtype esperada para o cenário: {tts}, retornada: {rows}"""}
+            response_validation['TTs'] = transactiontype
+        elif rows < tts:
+            transactiontype = {
+                "Status": f"""ERRO: Transtype abaixo do esperado para o cenário.Quantidade dessa transtype esperada para o cenário: {tts}, retornada: {rows}"""}
+            response_validation['TTs'] = transactiontype
+        else:
+            transactiontype = {
+                "Status": "Transtype Ok.Quantidade de transtype esperadas"}
+            response_validation['TTs'] = transactiontype
+            logging.info(response_validation)
+
+        # Campos de destino
+        codigo_departamento_empresa_destino = values['destino']["codigo_departamento_empresa"]
+        codigo_tipo_empresa_conglomerado_destino = values['destino']["codigo_tipo_empresa_conglomerado"]
+        codigo_empresa_conglomerado_destino = values['destino']["codigo_empresa_conglomerado"]
+        codigo_conta_contabil_destino_operacao_financeira = values['destino'][
+            "codigo_conta_contabil_destino_operacao_financeira"]
+
+        # Campos de origem
+        codigo_departamento_empresa_origem = values['origem']["codigo_departamento_empresa"]
+        codigo_tipo_empresa_conglomerado_origem = values['origem']["codigo_tipo_empresa_conglomerado"]
+        codigo_empresa_conglomerado_origem = values['origem']["codigo_empresa_conglomerado"]
+        codigo_conta_contabil_origem_operacao_financeira = values['origem'][
+            "codigo_conta_contabil_origem_operacao_financeira"]
+
+        tt_found = "true" if values['transaction_type'] in dffound[
+            'Codigo Tipo Transacao Lancamento Contabil'].values else "false"
+
+        if tt_found != 'true':
+            transaction = {"transaction_type": values['transaction_type'],
+                           "status": "Erro Transtype nao esperada para este cenario"}
+            response_validation[cenario_key].append(transaction)
+            logging.info("transaction_type nao esperada",
+                         response_validation)
+        else:
+            tt_values = dffound.loc[dffound['Codigo Tipo Transacao Lancamento Contabil']
+                                    == values['transaction_type']]
+            transaction = {
+                "transaction_type": values['transaction_type'], "status": "Transaction Type: Encontrada"}
+            response_validation[cenario_key].append(transaction)
+            logging.info("transaction_type esperada")
+
+        def validate_validacao(validacao_name, esperada_value, obtida_value, validacao_label):
+            if (tt_values is not None) and esperada_value == obtida_value:
+                result = {
+                    f"{validacao_label}": esperada_value,
+                    "status": f"{validacao_label}: OK",
+                    "esperada": esperada_value,
+                    "obtida": obtida_value
+                }
+            else:
+                result = {
+                    f"{validacao_label}": esperada_value,
+                    "status": f"ERRO: {validacao_label} diferente do esperado",
+                    "esperada": esperada_value,
+                    "obtida": obtida_value if tt_values is not None else "N/A"
+                }
+                logging.info(f"{validacao_label} não esperado")
+            response_validation[cenario_key].append(result)
+
+        # Validar campos de destino
+        validate_validacao('codigo_departamento_empresa_destino', codigo_departamento_empresa_destino,
+                       tt_values['Codigo Departamento Empresa Tipo Transacao Destino'].values[0],
+                       "Codigo Departamento Empresa Destino")
+        validate_validacao('codigo_tipo_empresa_conglomerado_destino', codigo_tipo_empresa_conglomerado_destino,
+                       tt_values['Codigo Tipo Empresa Conglomerado Tipo Transacao Destino'].values[0],
+                       "Codigo Tipo Empresa Conglomerado Destino")
+        validate_validacao('codigo_empresa_conglomerado_destino', codigo_empresa_conglomerado_destino,
+                       tt_values['Codigo Empresa Conglomerado Tipo Transacao Destino'].values[0],
+                       "Codigo Empresa Conglomerado Destino")
+        validate_validacao('codigo_conta_contabil_destino_operacao_financeira',
+                       codigo_conta_contabil_destino_operacao_financeira,
+                       tt_values['Codigo Conta-Contabil Destino Operacao-Financeira'].values[0],
+                       "Codigo Conta Contabil Destino")
+
+        # Validar campos de origem
+        validate_validacao('codigo_departamento_empresa_origem', codigo_departamento_empresa_origem,
+                       tt_values['Codigo Departamento Empresa Tipo Transacao Origem'].values[0],
+                       "Codigo Departamento Empresa Origem")
+        validate_validacao('codigo_tipo_empresa_conglomerado_origem', codigo_tipo_empresa_conglomerado_origem,
+                       tt_values['Codigo Tipo Empresa Conglomerado Tipo Transacao Origem'].values[0],
+                       "Codigo Tipo Empresa Conglomerado Origem")
+        validate_validacao('codigo_empresa_conglomerado_origem', codigo_empresa_conglomerado_origem,
+                       tt_values['Codigo Empresa Conglomerado Tipo Transacao Origem'].values[0],
+                       "Codigo Empresa Conglomerado Origem")
+        validate_validacao('codigo_conta_contabil_origem_operacao_financeira',
+                       codigo_conta_contabil_origem_operacao_financeira,
+                       tt_values['Codigo Conta-Contabil Origem Operacao-Financeira'].values[0],
+                       "Codigo Conta Contabil Origem")
+
+    lista_cenario.append(response_validation)
+    return lista_cenario
+
+
+def save_to_excel(validation_results, filename):
+    # Transformar a validação em DataFrame
+    result_list = []
+    for result in validation_results[0]['cenario']:
+        for key, value in result.items():
+            if isinstance(value, dict):
+                result_list.append({
+                    "validacao": key,
+                    "esperada": value.get('esperada', 'N/A'),
+                    "obtida": value.get('obtida', 'N/A'),
+                    "Status": value.get('status', 'N/A')
+                })
+            else:
+                result_list.append({
+                    "validacao": key,
+                    "esperada": 'N/A',
+                    "obtida": 'N/A',
+                    "Status": value
+                })
+
+    df = pd.DataFrame(result_list)
+    df.to_excel(filename, index=False)
+
+
+# Exemplo de uso
+athenadict = {}
+cenario = {
+    "transaction_types": [
+        {
+            "transaction_type": 1,
+            "destino": {
+                "codigo_departamento_empresa": 704,
+                "codigo_tipo_empresa_conglomerado": 4,
+                "codigo_empresa_conglomerado": 91,
+                "codigo_conta_contabil_destino_operacao_financeira": 9210
+            },
+            "origem": {
+                "codigo_departamento_empresa": 710,
+                "codigo_tipo_empresa_conglomerado": 4,
+                "codigo_empresa_conglomerado": 91,
+                "codigo_conta_contabil_origem_operacao_financeira": 2550
+            }
+        }
+    ],
+}
+response = [
+    {
+        "INFO": "Entrada encontrada em Athena",
+        "Dados do evento": [
+            {
+                "Codigo Tipo Transacao Lancamento Contabil": 1,
+                "Codigo Departamento Empresa Tipo Transacao Destino": 701,
+                "Codigo Tipo Empresa Conglomerado Tipo Transacao Destino": 4,
+                "Codigo Empresa Conglomerado Tipo Transacao Destino": 91,
+                "Codigo Conta-Contabil Destino Operacao-Financeira": 9210,
+                "Codigo Departamento Empresa Tipo Transacao Origem": 710,
+                "Codigo Tipo Empresa Conglomerado Tipo Transacao Origem": 4,
+                "Codigo Empresa Conglomerado Tipo Transacao Origem": 91,
+                "Codigo Conta-Contabil Origem Operacao-Financeira": 2550
+            }
+        ]
+    }
+]
+
+validation_results = validate(athenadict, cenario, response)
+random_id = uuid.uuid4()
+filename = f'resultado_valida_ph_{random_id}.xlsx'
+save_to_excel(validation_results, filename)
+print(f'Relatório salvo como {filename}')
