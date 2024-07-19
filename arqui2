@@ -1,0 +1,68 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from io import BytesIO
+import pandas as pd
+from uuid import uuid4
+import os
+from your_module import Automation  # Certifique-se de importar corretamente a classe Automation do seu módulo
+
+class TestAutomation(unittest.TestCase):
+
+    @patch('your_module.boto3.resource')
+    @patch('your_module.s3_service.upload_file')
+    @patch('your_module.s3_service.create_presigned_url')
+    def test_gera_arquivo(self, mock_create_presigned_url, mock_upload_file, mock_boto3_resource):
+        # Mock the environment variable
+        os.environ['BUCKET_NAME'] = 'test-bucket'
+        
+        # Mock the s3 resource
+        mock_s3_client = MagicMock()
+        mock_boto3_resource.return_value = mock_s3_client
+
+        # Mock the presigned URL creation
+        mock_create_presigned_url.return_value = 'https://example.com/presigned-url'
+        
+        # Create a mock event
+        event = [{
+            'Cenario1': {
+                'TTs': {'Status': 'TT Ok'},
+                '9': {
+                    'Sigla Sistema Origem': 'SystemA',
+                    'Descricao Tipo Transacao Lancamento Contabil': 'DescriptionA',
+                    'Codigo Centro-Custo Origem': 'CCO1',
+                    'Codigo Centro-Custo Destino': 'CCD1',
+                    'Data Hora Evento Ocorrido': '2024-07-19 12:34:56',
+                    'Data Contabil Transacao': '2024-07-19',
+                    'Valor Transacao Financeira': 100.0
+                },
+                '0': {'transaction_type': 'TypeA', 'status': 'StatusA'},
+                '5': {'codigo_tipo_empresa_conglomerado_origem': 'TipoEmpresa1'},
+                '8': {'codigo_conta_contabil_origem_operacao_financeira': 'ContaOrigem1'},
+                '1': {'codigo_departamento_empresa_destino': 'DeptDest1'},
+                '7': {'codigo_conta_contabil_destino_operacao_financeira': 'ContaDestino1'}
+            }
+        }]
+
+        automation = Automation()
+        response = automation.gera_arquivo(event)
+        
+        # Assertions
+        self.assertEqual(response['url'], 'https://example.com/presigned-url')
+        mock_upload_file.assert_called_once()
+        mock_create_presigned_url.assert_called_once_with('test-bucket', mock.ANY)
+
+        # Check the contents of the uploaded file
+        uploaded_data = BytesIO(mock_upload_file.call_args[0][0])
+        df_uploaded = pd.read_excel(uploaded_data)
+        expected_columns = [
+            'Cenario', 'Sigla Sistema Origem', 'Codigo Tipo Transacao Lancamento Contabil',
+            'Descricao Tipo Transacao Lancamento Contabil', 'Codigo Tipo Empresa Conglomerado Tipo Transacao Origem',
+            'Codigo Conta Contabil Origem', 'Codigo Departamento Empresa Tipo Transacao Destino',
+            'Codigo Conta Contabil Destino', 'Centro Custo Origem', 'Centro Custo Destino',
+            'Data Hora Evento Ocorrido', 'Data Contabil Transacao', 'Valor Transacao Financeira', 'Resultado'
+        ]
+        self.assertListEqual(list(df_uploaded.columns), expected_columns)
+        self.assertEqual(df_uploaded.shape[0], 1)  # Ensure one row
+
+if __name__ == '__main__':
+    unittest.main()
