@@ -1,0 +1,78 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from your_module import lambda_handler  # Substitua 'your_module' pelo nome real do seu módulo
+import constants as c
+
+
+class TestLambdaHandler(unittest.TestCase):
+
+    @patch('your_module.Automation.search_athena')
+    def test_lambda_handler_consulta_athena(self, mock_search_athena):
+        # Arrange
+        event = {
+            'executionName': 'test_execution',
+            'etapa': c.EtapaConsulta.consulta_athena,
+            'cenario': {
+                'eventos': [
+                    {
+                        'id': '1',
+                        'transaction_id': '123',
+                        'namespace': 'namespace1',
+                        'codigo_contrato_negociado': 'abc'
+                    }
+                ]
+            }
+        }
+        context = {}
+        mock_response = {
+            'found_athena': True,
+            'df': MagicMock()
+        }
+        mock_response['df'].to_dict.return_value = [{'some_key': 'some_value'}]
+        mock_search_athena.return_value = mock_response
+
+        # Act
+        response = lambda_handler(event, context)
+
+        # Assert
+        self.assertTrue(response['cenario']['validacao'][c.VALIDACAO_ATHENA_DADOS])
+        self.assertTrue(response['cenario']['eventos'][0]['validacao'][c.VALIDACAO_ATHENA_DADOS])
+        self.assertEqual(response['cenario']['eventos'][0]['dados_athena'], [{'some_key': 'some_value'}])
+
+    @patch('your_module.Automation.validate')
+    @patch('your_module.Automation.gera_arquivo')
+    @patch('your_module.logging.info')
+    def test_lambda_handler_valida_cenarios(self, mock_logging_info, mock_gera_arquivo, mock_validate):
+        # Arrange
+        event = {
+            'executionName': 'test_execution',
+            'etapa': c.EtapaConsulta.valida_cenarios,
+            'cenarios': 'cenarios_test'
+        }
+        context = {}
+        mock_validate.return_value = 'validation_data'
+        mock_gera_arquivo.return_value = 'generated_file_url'
+
+        # Act
+        response = lambda_handler(event, context)
+
+        # Assert
+        self.assertEqual(response, 'generated_file_url')
+        mock_logging_info.assert_called_once_with('Execucao: test_execution - Arquivo gerado: generated_file_url')
+
+    def test_lambda_handler_invalid_etapa(self):
+        # Arrange
+        event = {
+            'executionName': 'test_execution',
+            'etapa': 'invalid_etapa'
+        }
+        context = {}
+
+        # Act & Assert
+        with self.assertRaises(ValueError) as context:
+            lambda_handler(event, context)
+        self.assertIn("Etapa invalid_etapa inválida", str(context.exception))
+
+
+if __name__ == '__main__':
+    unittest.main()
