@@ -1,0 +1,37 @@
+import unittest
+from src.errors import ErrorLog, ScenarioOnDemandNotFound, ScenarioWithoutTTOnDemandNotFound
+from src import system_variables as sv
+
+class TestErrorLog(unittest.TestCase):
+    def test_error_log_message(self):
+        error_msg = "This is a test error message."
+        error_log = ErrorLog(error_msg)
+        self.assertEqual(str(error_log), error_msg)
+
+class TestScenarioOnDemandNotFound(unittest.TestCase):
+    def setUp(self):
+        self.scenario = "TestScenario"
+        self.nome_demanda = "TestDemand"
+        sv.SCENARIOS_TABLE = "TestTable"
+
+    def test_scenario_on_demand_not_found_message(self):
+        expected_message = f"""Unable to find the scenario {self.scenario} \
+from the table {sv.SCENARIOS_TABLE} on {self.nome_demanda}."""
+        error = ScenarioOnDemandNotFound(self.scenario, self.nome_demanda)
+        self.assertEqual(str(error), expected_message)
+
+class TestScenarioWithoutTTOnDemandNotFound(unittest.TestCase):
+    def setUp(self):
+        self.scenario = "TestScenario"
+        self.nome_demanda = "TestDemand"
+        sv.SCENARIOS_TABLE = "TestTable"
+
+    def test_scenario_without_tt_on_demand_not_found_message(self):
+        expected_message = f"""Unable to find the transaction_types on \
+scenario {self.scenario} from the table {sv.SCENARIOS_TABLE} on \
+{self.nome_demanda}."""
+        error = ScenarioWithoutTTOnDemandNotFound(self.scenario, self.nome_demanda)
+        self.assertEqual(str(error), expected_message)
+
+if __name__ == '__main__':
+    unittest.main()
