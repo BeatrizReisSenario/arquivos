@@ -1,0 +1,97 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from src.cloudwatch_logs import CloudwatchLogs  # Substitua 'src.cloudwatch_logs' pelo caminho real do seu módulo
+from datetime import datetime as dt, timedelta
+
+
+class TestCloudwatchLogs(unittest.TestCase):
+
+    @patch('boto3.client')
+    def setUp(self, mock_boto_client):
+        self.mock_boto_client = mock_boto_client
+        self.mock_logs_client = mock_boto_client.return_value
+        self.cloudwatch_logs = CloudwatchLogs(log_group='test-log-group')
+
+    def test_get_latest_logs(self):
+        # Arrange
+        query_response = {
+            'queryId': 'test-query-id'
+        }
+        query_results = {
+            'status': 'Complete',
+            'results': [
+                [{'field': '@timestamp', 'value': '2021-07-01T00:00:00Z'},
+                 {'field': '@message', 'value': 'test message'}]
+            ]
+        }
+        self.mock_logs_client.start_query.return_value = query_response
+        self.mock_logs_client.get_query_results.return_value = query_results
+
+        # Act
+        response = self.cloudwatch_logs.get_latest_logs()
+
+        # Assert
+        self.mock_logs_client.start_query.assert_called_once()
+        self.mock_logs_client.get_query_results.assert_called_with(queryId='test-query-id')
+        self.assertEqual(response, query_results['results'])
+
+    def test_get_transaction_id_logs(self):
+        # Arrange
+        transaction_id = '123456'
+        query_results = {
+            'status': 'Complete',
+            'results': [
+                [{'field': '@timestamp', 'value': '2021-07-01T00:00:00Z'},
+                 {'field': '@message', 'value': '{"transactionid":"123456","data":"some data"}'}]
+            ]
+        }
+        self.cloudwatch_logs.get_latest_logs = MagicMock(return_value=query_results['results'])
+
+        # Act
+        response = self.cloudwatch_logs.get_transaction_id_logs(transaction_id=transaction_id)
+
+        # Assert
+        self.cloudwatch_logs.get_latest_logs.assert_called_once()
+        self.assertIsInstance(response, list)
+        self.assertEqual(response[0]['timestamp'], '2021-07-01T00:00:00Z')
+        self.assertEqual(response[0]['message'], '{"transactionid":"123456","data":"some data"}')
+
+    def test_get_logs_by_query(self):
+        # Arrange
+        query = 'fields @timestamp, @message | sort @timestamp desc'
+        query_results = {
+            'status': 'Complete',
+            'results': [
+                [{'field': '@timestamp', 'value': '2021-07-01T00:00:00Z'},
+                 {'field': '@message', 'value': 'test message'}]
+            ]
+        }
+        self.cloudwatch_logs.get_latest_logs = MagicMock(return_value=query_results['results'])
+
+        # Act
+        response = self.cloudwatch_logs.get_logs_by_query(query=query)
+
+        # Assert
+        self.cloudwatch_logs.get_latest_logs.assert_called_once_with(query=query, delta={"hours": 72})
+        self.assertIsInstance(response, list)
+        self.assertEqual(response[0]['timestamp'], '2021-07-01T00:00:00Z')
+        self.assertEqual(response[0]['message'], 'test message')
+
+    def test_log_to_dict_list(self):
+        # Arrange
+        log_list = [
+            [{'field': '@timestamp', 'value': '2021-07-01T00:00:00Z'},
+             {'field': '@message', 'value': 'test message'}]
+        ]
+
+        # Act
+        response = CloudwatchLogs.log_to_dict_list(log_list)
+
+        # Assert
+        self.assertIsInstance(response, list)
+        self.assertEqual(response[0]['timestamp'], '2021-07-01T00:00:00Z')
+        self.assertEqual(response[0]['message'], 'test message')
+
+
+if __name__ == '__main__':
+    unittest.main()
