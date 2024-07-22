@@ -1,0 +1,41 @@
+import unittest
+import pandas as pd
+from unittest.mock import patch
+from src.automation import Automation
+
+
+class TestAutomation(unittest.TestCase):
+
+    @patch('awswrangler.cloudwatch.read_logs')
+    def test_find_cw_captura(self, mock_read_logs):
+        # Configurar o mock para retornar um DataFrame vazio
+        mock_read_logs.return_value = pd.DataFrame()
+
+        # Teste quando não há logs encontrados
+        automation = Automation()
+        self.assertFalse(automation.find_cw_captura("test_id", "test_namespace"))
+
+        # Configurar o mock para retornar um DataFrame não vazio
+        mock_read_logs.return_value = pd.DataFrame({"message": ["log1", "log2"]})
+
+        # Teste quando logs são encontrados
+        self.assertTrue(automation.find_cw_captura("test_id", "test_namespace"))
+
+    @patch('awswrangler.cloudwatch.read_logs')
+    def test_find_cw_producer(self, mock_read_logs):
+        # Configurar o mock para retornar um DataFrame vazio
+        mock_read_logs.return_value = pd.DataFrame()
+
+        # Teste quando não há logs encontrados
+        automation = Automation()
+        self.assertFalse(automation.find_cw_producer("test_id", "test_namespace"))
+
+        # Configurar o mock para retornar um DataFrame não vazio
+        mock_read_logs.return_value = pd.DataFrame({"message": ["log1", "log2"]})
+
+        # Teste quando logs são encontrados
+        self.assertTrue(automation.find_cw_producer("test_id", "test_namespace"))
+
+
+if __name__ == '__main__':
+    unittest.main()
