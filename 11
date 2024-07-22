@@ -1,0 +1,72 @@
+import unittest
+import pytest
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
+import os
+from lambda_function import app
+
+client = TestClient(app)
+
+@pytest.fixture
+def mock_boto3_client(mocker):
+    mock_boto3 = mocker.patch("lambda_function.boto3")
+    return mock_boto3
+
+@pytest.fixture
+def mock_jwt_decode(mocker):
+    mock_jwt = mocker.patch("lambda_function.jwt.decode")
+    return mock_jwt
+
+@pytest.fixture(autouse=True)
+def set_account_id_env_var():
+    os.environ["ACCOUNT_ID"] = "123456789012"
+    yield
+    del os.environ["ACCOUNT_ID"]
+
+def test_post_automacaoph_validacoes(mock_boto3_client, mock_jwt_decode):
+    # Mock the JWT decode function
+    mock_jwt_decode.return_value = {
+        'usr': 'testuser',
+        'funcional': 'testfuncional',
+        'memberOf': 'group1/group2'
+    }
+
+    # Mock the boto3 Step Functions client
+    mock_step_functions = MagicMock()
+    mock_boto3_client.client.return_value = mock_step_functions
+    mock_step_functions.start_execution.return_value = {
+        'executionArn': 'arn:aws:states:sa-east-1:123456789012:execution:multivisao-automacaopofph:test'
+    }
+
+    request_data = {
+        "cenarios": [
+            {"key": "value"}
+        ]
+    }
+
+    response = client.post("/automacaoph/v1/validacoes", json=request_data)
+    assert response.status_code == 200
+    assert "data" in response.json()
+    assert "id_execucao" in response.json()["data"]
+
+def test_get_automacaoph_validacoes(mock_boto3_client):
+    # Mock the boto3 Step Functions client
+    mock_step_functions = MagicMock()
+    mock_boto3_client.client.return_value = mock_step_functions
+    mock_step_functions.describe_execution.return_value = {
+        'status': 'SUCCEEDED',
+        'output': '{}'
+    }
+
+    validacao_id = "test_execution_id"
+    response = client.get(f"/automacaoph/v1/validacoes/{validacao_id}")
+    assert response.status_code == 200
+    assert response.json() == {
+        'status': 'SUCCEEDED',
+        'output': '{}'
+    }
+
+
+
+if __name__ == '__main__':
+    unittest.main()
