@@ -1,0 +1,63 @@
+import unittest
+from datetime import datetime, timedelta
+import pytest
+from unittest.mock import patch, MagicMock
+
+from joserfc import jwt
+
+from src.shared.middlewares.user import User
+from tests.test_user_middleware import SECRET_KEY
+
+@pytest.fixture
+def mock_jwt_decode():
+    with patch('src.shared.middlewares.user.jwt.decode') as mock_decode:
+        yield mock_decode
+
+
+def test_user_init_with_valid_token(mock_jwt_decode):
+    # Mock the JWT decode function
+    mock_jwt_decode.return_value = {
+        'usr': 'testuser',
+        'funcional': 'testfuncional',
+        'memberOf': 'group1/group2'
+    }
+
+    auth_token = "Bearer valid.token.here"
+    user = User(auth_token)
+
+    assert user.auth_token == "valid.token.here"
+    assert user.racf == "TESTUSER"
+    assert user.funcional == "TESTFUNCIONAL"
+    assert user.grupos == ["group1", "group2"]
+
+
+def generate_valid_token():
+    payload = {
+        "sub": "user_id",
+        "usr": "TESTUSER",
+        "funcional": "TESTFUNCIONAL",
+        "exp": datetime.utcnow() + timedelta(minutes=30),
+        "memberOf": "TESTGROUP"
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
+def test_user_init_without_bearer(mock_jwt_decode):
+    # Mock the JWT decode function
+    mock_jwt_decode.return_value = {
+        'usr': 'testuser',
+        'funcional': 'testfuncional',
+        'memberOf': 'group1/group2'
+    }
+
+    auth_token = "valid.token.here"
+    user = User(auth_token)
+
+    assert user.auth_token == "valid.token.here"
+    assert user.racf == "TESTUSER"
+    assert user.funcional == "TESTFUNCIONAL"
+    assert user.grupos == ["group1", "group2"]
+
+
+if __name__ == '__main__':
+    unittest.main()
