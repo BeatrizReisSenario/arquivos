@@ -1,0 +1,71 @@
+import unittest
+
+import pytest
+import jwt
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
+from src.shared.models.user import User
+from src.shared.middlewares.user_middleware import UserMiddleware
+from datetime import datetime, timedelta
+
+# Configurar uma chave secreta para assinar o token
+SECRET_KEY = "mysecretkey"
+
+# Criar um aplicativo FastAPI para testar o middleware
+app = FastAPI()
+
+# Adicionar o middleware ao aplicativo FastAPI
+app.add_middleware(UserMiddleware)
+
+# Adicionar uma rota de teste para verificar o estado da requisição
+@app.get("/test")
+async def test_route(request: Request):
+    user = getattr(request.state, 'user', None)
+    if user:
+        return {"auth_token": user.auth_token, "racf": user.racf}
+    return {"message": "No user"}
+
+@pytest.fixture
+def test_client():
+    return TestClient(app)
+
+
+# Função para gerar um token JWT válido
+def generate_valid_token():
+    payload = {
+        "sub": "user_id",
+        "usr": "TESTUSER",
+        "funcional": "TESTFUNCIONAL",
+        "exp": datetime.utcnow() + timedelta(minutes=30),
+        "memberOf": "TESTGROUP"
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
+@patch('src.shared.models.user.User')
+def test_user_middleware_with_auth_token(mock_user_class, test_client):
+    # Configurar o retorno do mock do User
+    mock_user = MagicMock()
+    mock_user.auth_token = generate_valid_token()
+    mock_user.racf = "TESTUSER"
+    mock_user_class.return_value = mock_user
+
+    headers = {"authorization": f"Bearer {mock_user.auth_token}"}
+    response = test_client.get("/test", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"auth_token": mock_user.auth_token, "racf": "TESTUSER"}
+
+
+@patch('src.shared.models.user.User')
+def test_user_middleware_without_auth_token(mock_user_class, test_client):
+    response = test_client.get("/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "No user"}
+
+
+if __name__ == '__main__':
+    unittest.main()
