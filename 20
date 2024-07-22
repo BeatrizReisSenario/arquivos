@@ -1,0 +1,109 @@
+import unittest
+from io import BytesIO
+from unittest.mock import patch, MagicMock
+
+import boto3
+import pandas as pd
+from src.automation1 import search_athena,  Automation
+from moto import s3
+
+
+class TestSearchAthena(unittest.TestCase):
+
+    @patch('awswrangler.athena.read_sql_query')
+    @patch('os.environ', {'KMS_KEY_ARN': 'fake_kms_key'})
+    def test_search_athena_found(self, mock_read_sql_query):
+        mock_df = pd.DataFrame({'some_column': [1, 2, 3]})
+        mock_read_sql_query.return_value = mock_df
+
+        result = search_athena('id', 'namespace', 'transaction_id', 'codigo_contrato_negociado')
+
+        self.assertEqual(result['message'], 'Entrada encontrada em Athena')
+        self.assertEqual(result['rows'], 3)
+        self.assertTrue('df' in result)
+        pd.testing.assert_frame_equal(result['df'], mock_df)
+
+    @patch('awswrangler.athena.read_sql_query')
+    @patch('os.environ', {'KMS_KEY_ARN': 'fake_kms_key'})
+
+    def test_search_athena_not_found(self, mock_read_sql_query):
+        mock_df = pd.DataFrame()
+        mock_read_sql_query.return_value = mock_df
+
+        result = search_athena('id', 'namespace', 'transaction_id', 'codigo_contrato_negociado')
+
+        self.assertEqual(result['message'], 'Entrada nao encontrada em Athena')
+        self.assertEqual(result['rows'], 0)
+        self.assertTrue('df' in result)
+        pd.testing.assert_frame_equal(result['df'], mock_df)
+
+
+class TestAutomation(unittest.TestCase):
+
+    def setUp(self):
+        self.automation = Automation()
+        self.athenadict = {}
+        self.cenario = {'transaction_types': [{'transaction_type': 'TT1'}]}
+        self.response = [{'INFO': 'Entrada encontrada em Athena',
+                          'cenario': 'CT1',
+                          'Dados do evento': [{'transaction_type': 'TT1',
+                                               'Codigo Tipo Transacao Lancamento Contabil': 'TESTE'
+                                               }]}]
+
+
+    def test_validate_not_found(self):
+        response = [{'INFO': 'Entrada nao encontrada em Athena'}]
+        validation_result = self.automation.validate(self.athenadict, self.cenario, response)
+        self.assertIsInstance(validation_result, list)
+        self.assertIn("Nao foi encontrado nenhum registro no Athena", validation_result[0])
+
+    '''@patch('src.automation1.Automation.save_file')
+    @patch('boto3.resource')
+    @patch('os.environ', {'BUCKET_NAME': 'fake_bucket'})'''
+
+    @patch('boto3.resource')
+    def test_gera_arquivo(self, mock_boto3_resource):
+        #mockando os serviços
+        mock_bucket = MagicMock()
+        mock_s3 = MagicMock()
+        mock_boto3_resource.return_value = mock_s3
+        mock_s3.Bucket.return_value = mock_bucket
+
+        # Dados de entrada para o teste
+
+        event = [{ 'sistemaorigem': 'teste',
+        'codigotipotransacaolancamentocontabil': 'teste',
+        'descricaotipotransacaolancamentocontabil': 'teste',
+        'codigotipoempresaconglomeradotipotransacaoorigem': 'teste',
+        'codigodepartarmentoempresatipotransacaoorigem': 'teste',
+        'codigocontacontabilorigem': 'teste',
+        'codigotipoempresaconglomeradotipotransacaoorigem': 'teste',
+        'codigodepartamentoempresatipotransacaodestino': 'teste',
+        'codigodepatarmentoempresatipotransacaoorigem':'teste',
+        'codigocontacontabildestino': 'teste',
+        'centrocustoorigem': 'teste',
+        'centrocustodestino': 'teste',
+        'datahoraeventoocorrido': 'teste',
+        'datacontabiltransacao': 'teste',
+        'valortransacaofinanceira': 'teste',
+        'transactionid': 'teste',
+        'id': 'teste',
+        'codigocontratonegociado': 'teste',
+        'namespace': 'teste'
+    }]
+        #chamando o metodo que estou testando
+        buffer = BytesIO()
+        bucket_name = 'test-bucket'
+        filename = 'movimentos_lancamentos.csv'
+        result = Automation.save_file(buffer, bucket_name, filename)
+
+        # Verificando os resultados
+        self.assertEqual(result['message'], 'File uploaded to test-bucket/movimentos_lancamentos.csv')
+        mock_bucket.upload_fileobj.assert_called_once_with(buffer, filename)
+
+
+
+
+if __name__ == '__main__':
+    unittest.main()
+
