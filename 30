@@ -1,0 +1,60 @@
+from configuration.log_config import logging
+from src.automation import Automation
+import constants as c
+
+def lambda_handler(event: dict, context):  # NOSONAR
+    cenarios_encontrados = []
+    cenarios_nao_encontrados = []
+
+    etapa = event["etapa"]
+    cenarios = event["cenarios_encontrados"]
+
+    if etapa == c.ETAPA_CW.CAPTURA:
+        fn_find_cw = Automation.find_cw_captura
+        cw_validacao = c.ETAPA_CW.CAPTURA
+
+    elif etapa == c.ETAPA_CW.PRODUCER_ENTREGA_MOTORES:
+        fn_find_cw = Automation.find_cw_producer
+        cw_validacao = c.ETAPA_CW.PRODUCER_ENTREGA_MOTORES
+
+    else:
+        raise ValueError(f"Etapa {etapa} inválida")
+
+    for cenario in cenarios:
+        encontrou_todos_eventos = True
+        
+        for transaction in cenario['transaction_types']:
+            # Supomos que 'eventos' está associado a cada tipo de transação.
+            # Ajuste essa lógica conforme necessário.
+            eventos = transaction.get('eventos', [])  # Pega a lista de eventos, se houver
+            
+            for evento in eventos:
+                if evento['codigo_contrato_negociado']:
+                    evento[cw_validacao] = True
+                    continue
+                else:
+                    chave = evento.get('id') or evento.get('transaction_id')
+
+                if not chave:
+                    raise ValueError(
+                        f"Evento {evento} não possui chave válida")
+
+                evento[cw_validacao] = fn_find_cw(
+                    id=chave, namespace=evento["namespace"])
+                
+                # Verificar se todos os eventos são válidos
+                if not evento[cw_validacao]:
+                    encontrou_todos_eventos = False
+
+        if encontrou_todos_eventos:
+            cenarios_encontrados.append(cenario)
+        else:
+            cenarios_nao_encontrados.append(cenario)
+
+    logging.info(f"Cenarios: {cenarios}")
+
+    return {
+        'etapa': etapa,
+        'cenarios_encontrados': cenarios_encontrados,
+        'cenarios_nao_encontrados': cenarios_nao_encontrados
+    }
