@@ -1,0 +1,172 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from lambda_function1 import lambda_handler, c
+
+class TestLambdaFunction(unittest.TestCase):
+
+    @patch('lambda_function1.Automation.find_cw_captura')
+    def test_lambda_handler_captura_todos_eventos_encontrados(self, mock_find_cw_captura):
+        # Mock da função find_cw_captura para sempre retornar True
+        mock_find_cw_captura.return_value = True
+
+        # Dados de entrada para o teste
+        event = {
+            "etapa": "cw_captura",
+            "cenarios_encontrados": [
+                {
+                    "cenario": "C1",
+                    "transaction_types": [
+                        {
+                            "transaction_type": "01",
+                            "eventos": [
+                                {
+                                    "id": "920382937",
+                                    "transaction_id": "29832963297hsgbwq7126v",
+                                    "namespace": "br.com.br",
+                                    "codigo_contrato_negociado": "932937293n9n9",
+                                    "cw_captura": False
+                                }
+                            ],
+                            "destino": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_destino_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            },
+                            "origem": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_origemo_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "cenarios_nao_encontrados": []
+        }
+        context = {}
+
+        result = lambda_handler(event, context)
+
+        self.assertEqual(result['etapa'], "cw_captura")
+        self.assertEqual(len(result['cenarios_encontrados']), 1)
+        self.assertEqual(len(result['cenarios_nao_encontrados']), 0)
+        self.assertTrue(result['cenarios_encontrados'][0]['transaction_types'][0]['eventos'][0]['cw_captura'])
+
+    @patch('lambda_function1.Automation.find_cw_producer')
+    def test_lambda_handler_producer_eventos_nao_encontrados(self, mock_find_cw_producer):
+        # Mock da função find_cw_producer para sempre retornar False
+        mock_find_cw_producer.return_value = False
+
+        # Dados de entrada para o teste
+        event = {
+            "etapa": "cw_producer_entrega_motores",
+            "cenarios_encontrados": [
+                {
+                    "cenario": "C2",
+                    "transaction_types": [
+                        {
+                            "transaction_type": "02",
+                            "eventos": [
+                                {
+                                    "id": "123456789",
+                                    "transaction_id": "29832963297hsgbwq7126v",
+                                    "namespace": "br.com.br",
+                                    "codigo_contrato_negociado": "",
+                                    "cw_captura": False
+                                }
+                            ],
+                            "destino": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_destino_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            },
+                            "origem": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_origemo_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "cenarios_nao_encontrados": []
+        }
+        context = {}
+
+        result = lambda_handler(event, context)
+
+        self.assertEqual(result['etapa'], "cw_producer_entrega_motores")
+        self.assertEqual(len(result['cenarios_encontrados']), 0)
+        self.assertEqual(len(result['cenarios_nao_encontrados']), 1)
+        self.assertFalse(result['cenarios_nao_encontrados'][0]['transaction_types'][0]['eventos'][0]['cw_captura'])
+
+    def test_lambda_handler_etapa_invalida(self):
+        # Testando o tratamento de uma etapa inválida
+        event = {
+            "etapa": "etapa_invalida",
+            "cenarios_encontrados": [],
+            "cenarios_nao_encontrados": []
+        }
+        context = {}
+
+        with self.assertRaises(ValueError) as context_manager:
+            lambda_handler(event, context)
+
+        self.assertEqual(str(context_manager.exception), "Etapa etapa_invalida inválida")
+
+    @patch('lambda_function1.Automation.find_cw_captura')
+    def test_lambda_handler_chave_invalida(self, mock_find_cw_captura):
+        # Mock da função find_cw_captura para sempre retornar False
+        mock_find_cw_captura.return_value = False
+
+        # Dados de entrada para o teste
+        event = {
+            "etapa": "cw_captura",
+            "cenarios_encontrados": [
+                {
+                    "cenario": "C1",
+                    "transaction_types": [
+                        {
+                            "transaction_type": "01",
+                            "eventos": [
+                                {
+                                    "id": None,
+                                    "transaction_id": None,
+                                    "namespace": "br.com.br",
+                                    "codigo_contrato_negociado": "",
+                                    "cw_captura": False
+                                }
+                            ],
+                            "destino": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_destino_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            },
+                            "origem": {
+                                "codigo_deprtamento_empresa": "04",
+                                "código_empresa_conglomerado": "341",
+                                "codigo_conta_contabil_origemo_operacao_financeira": "000012",
+                                "codigo_tipo_empresa_conglomerado": "002"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "cenarios_nao_encontrados": []
+        }
+        context = {}
+
+        with self.assertRaises(ValueError) as context_manager:
+            lambda_handler(event, context)
+
+        self.assertEqual(str(context_manager.exception),
+                         "Evento {'id': None, 'transaction_id': None, 'namespace': 'br.com.br', 'codigo_contrato_negociado': '', 'cw_captura': False} não possui chave válida")
+
+
+if __name__ == '__main__':
+    unittest.main()
