@@ -1,0 +1,248 @@
+import unittest
+import pandas as pd
+from your_module import Automation
+
+class TestAutomation(unittest.TestCase):
+    
+    def setUp(self):
+        """Executa antes de cada método de teste."""
+        self.automation = Automation()
+        # Mock de dados para simular `athenadict` e `cenario`
+        self.athenadict = {
+            "id": "12345",
+            "namespace": "mockNamespace",
+            "transaction_id": "mockTransactionId",
+            "codigo_contrato_negociado": "mockContratoNegociado"
+        }
+        self.cenario = {
+            "transaction_types": [
+                {
+                    "transaction_type": "TXN001",
+                    "destino": {
+                        "codigo_departamento_empresa": "001",
+                        "codigo_tipo_empresa_conglomerado": "02",
+                        "codigo_empresa_conglomerado": "03",
+                        "codigo_conta_contabil_destino_operacao_financeira": "004"
+                    },
+                    "origem": {
+                        "codigo_departamento_empresa": "005",
+                        "codigo_tipo_empresa_conglomerado": "06",
+                        "codigo_empresa_conglomerado": "07",
+                        "codigo_conta_contabil_origem_operacao_financeira": "008"
+                    }
+                }
+            ]
+        }
+        self.response = [
+            {
+                'INFO': 'Entrada encontrada em Athena',
+                'Dados do evento': [
+                    {
+                        'Codigo Tipo Transacao Lancamento Contabil': 'TXN001',
+                        'Codigo Departamento Empresa Tipo Transacao Destino': '001',
+                        'Codigo Tipo Empresa Conglomerado Tipo Transacao Destino': '02',
+                        'Codigo Empresa Conglomerado Tipo Transacao Destino': '03',
+                        'Codigo Conta-Contabil Destino Operacao-Financeira': '004',
+                        'Codigo Departamento Empresa Tipo Transacao Origem': '005',
+                        'Codigo Tipo Empresa Conglomerado Tipo Transacao Origem': '06',
+                        'Codigo Empresa Conglomerado Tipo Transacao Origem': '07',
+                        'Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem': '008',
+                        'Sigla Sistema Origem': 'SYS',
+                        'Descricao Tipo Transacao Lancamento Contabil': 'Transaction Desc',
+                        'Codigo Centro-Custo Origem': '101',
+                        'Codigo Centro-Custo Destino': '202',
+                        'Data Hora Evento Ocorrido': '2024-01-01 12:00:00',
+                        'Data Contabil Transacao': '2024-01-01',
+                        'Valor Transacao Financeira': 1000.00
+                    }
+                ],
+                'cenario': 'mockCenario'
+            }
+        ]
+
+    def test_validate_no_athena_entries(self):
+        """Teste para garantir que o retorno adequado ocorre quando não há entradas no Athena."""
+        empty_response = []
+        result = self.automation.validate(self.athenadict, self.cenario, empty_response)
+        expected_result = f"Nao foi encontrado nenhum registro no Athena para este cenario: {self.cenario}"
+        self.assertEqual(result, expected_result)
+
+    def test_validate_transaction_types_above_expected(self):
+        """Teste para o caso em que o número de tipos de transação é maior que o esperado."""
+        # Mock de resposta com transações adicionais
+        response_with_extra_transactions = self.response + self.response  # Duas entradas em vez de uma
+        result = self.automation.validate(self.athenadict, self.cenario, response_with_extra_transactions)
+        expected_message = "ERRO: Transtype além do esperado para o cenário."
+        self.assertIn(expected_message, result[0]['mockCenario'][0]['Status'])
+
+    def test_validate_transaction_types_below_expected(self):
+        """Teste para o caso em que o número de tipos de transação é menor que o esperado."""
+        # Modifica o cenario para esperar mais transações
+        self.cenario['transaction_types'].append({
+            "transaction_type": "TXN002",
+            "destino": {
+                "codigo_departamento_empresa": "010",
+                "codigo_tipo_empresa_conglomerado": "011",
+                "codigo_empresa_conglomerado": "012",
+                "codigo_conta_contabil_destino_operacao_financeira": "013"
+            },
+            "origem": {
+                "codigo_departamento_empresa": "014",
+                "codigo_tipo_empresa_conglomerado": "015",
+                "codigo_empresa_conglomerado": "016",
+                "codigo_conta_contabil_origem_operacao_financeira": "017"
+            }
+        })
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_message = "ERRO: Transtype abaixo do esperado para o cenário."
+        self.assertIn(expected_message, result[0]['mockCenario'][0]['Status'])
+
+    def test_validate_transaction_types_correct(self):
+        """Teste para garantir que o número de tipos de transação está correto."""
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_message = "Transtype Ok.Quantidade de transtype esperadas"
+        self.assertIn(expected_message, result[0]['mockCenario'][0]['Status'])
+
+    def test_validate_unexpected_transaction_type(self):
+        """Teste para verificar comportamento com tipo de transação inesperado."""
+        # Altera a transação para um tipo inesperado
+        self.cenario['transaction_types'][0]['transaction_type'] = 'TXN999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_message = "Erro Transtype nao esperada para este cenario"
+        self.assertIn(expected_message, result[0]['mockCenario'][0]['status'])
+
+    def test_validate_codigo_departamento_empresa_destino(self):
+        """Teste para verificar o comportamento com código de departamento de destino correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Dep Empresa: OK"
+        self.assertIn(expected_status, result[0]['mockCenario'][1]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['destino']['codigo_departamento_empresa'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: Codigo departamento credito nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][1]['status'])
+
+    def test_validate_codigo_tipo_empresa_conglomerado_destino(self):
+        """Teste para verificar o comportamento com código de tipo de empresa conglomerado destino correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Tipo Conglomerado Destino: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][2]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['destino']['codigo_tipo_empresa_conglomerado'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: Codigo tipo empresa conglomerado destino nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][2]['status'])
+
+    def test_validate_codigo_empresa_conglomerado_destino(self):
+        """Teste para verificar o comportamento com código de empresa conglomerado destino correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Empresa Conglomerado Tipo Destino: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][3]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['destino']['codigo_empresa_conglomerado'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: Codigo Empresa Destino destino nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][3]['status'])
+
+    def test_validate_codigo_departamento_empresa_origem(self):
+        """Teste para verificar o comportamento com código de departamento de origem correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo departamento origem: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][4]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['origem']['codigo_departamento_empresa'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: codigo_departamento_empresa_origem nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][4]['status'])
+
+    def test_validate_codigo_tipo_empresa_conglomerado_origem(self):
+        """Teste para verificar o comportamento com código de tipo de empresa conglomerado origem correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Tipo Conglomerado Origem: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][5]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['origem']['codigo_tipo_empresa_conglomerado'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: codigo_tipo_empresa_conglomerado_origem nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][5]['status'])
+
+    def test_validate_codigo_empresa_conglomerado_origem(self):
+        """Teste para verificar o comportamento com código de empresa conglomerado origem correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Empresa Conglomerado Tipo Origem: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][6]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['origem']['codigo_empresa_conglomerado'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: codigo_empresa_conglomerado_origem nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][6]['status'])
+
+    def test_validate_codigo_conta_contabil_destino(self):
+        """Teste para verificar o comportamento com código de conta contábil destino correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Conta Contabil Destino: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][7]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['destino']['codigo_conta_contabil_destino_operacao_financeira'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: codigo_conta_contabil_destino nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][7]['status'])
+
+    def test_validate_codigo_conta_contabil_origem(self):
+        """Teste para verificar o comportamento com código de conta contábil origem correto/incorreto."""
+        # Caso esperado
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Codigo Conta Contabil Origem: Ok"
+        self.assertIn(expected_status, result[0]['mockCenario'][8]['status'])
+
+        # Caso inesperado
+        self.cenario['transaction_types'][0]['origem']['codigo_conta_contabil_origem_operacao_financeira'] = '999'
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: codigo_conta_contabil_origem nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][8]['status'])
+
+    def test_validate_dados_evento_absent(self):
+        """Teste para verificar o comportamento quando os dados do evento não estão presentes."""
+        # Remove os dados do evento
+        response_missing_dados_evento = [{"INFO": "Entrada encontrada em Athena", "cenario": "mockCenario"}]
+        result = self.automation.validate(self.athenadict, self.cenario, response_missing_dados_evento)
+        expected_message = "ERRO: Nenhum dado encontrado no evento para o cenario"
+        self.assertIn(expected_message, result)
+
+    def test_validate_transaction_value(self):
+        """Teste para verificar o valor da transação."""
+        # Valor correto
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Valor Transacao: OK"
+        self.assertIn(expected_status, result[0]['mockCenario'][9]['status'])
+
+        # Valor incorreto
+        self.response[0]['Dados do evento'][0]['Valor Transacao Financeira'] = 9999.99
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "ERRO: Valor transacao nao esperado"
+        self.assertIn(expected_status, result[0]['mockCenario'][9]['status'])
+
+    def test_validate_all_ok(self):
+        """Teste para garantir que tudo está OK e validar o estado final."""
+        result = self.automation.validate(self.athenadict, self.cenario, self.response)
+        expected_status = "Transtype Ok.Quantidade de transtype esperadas"
+        expected_status_2 = "Status Geral: APROVADO"
+        self.assertIn(expected_status, result[0]['mockCenario'][0]['Status'])
+        self.assertIn(expected_status_2, result[0]['mockCenario'][-1]['Status Geral'])
+
+if __name__ == '__main__':
+    unittest.main()
