@@ -1,0 +1,161 @@
+import streamlit as st
+import pandas as pd
+import boto3
+from io import BytesIO
+import openpyxl
+
+def upload_file():
+    st.title("Validador PH")
+
+    # Upload do arquivo Excel
+    excel_file = st.file_uploader("Faça o upload do PH preenchido - arquivo Excel", type=["xlsx"])
+
+    # Botão para processar
+    if st.button("Validar Cenários"):
+        if excel_file is not None:
+            # Processar o arquivo e validar os cenários
+            df_resultado = processar_e_validar(excel_file)
+
+            # Gerar relatório para download
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Resultado')
+                writer.save()
+            st.success("Validação concluída!")
+            st.download_button(
+                label="Baixar Relatório",
+                data=output.getvalue(),
+                file_name="relatorio_validacao.xlsx"
+            )
+        else:
+            st.warning("Por favor, faça o upload do arquivo Excel.")
+
+# Função para processar e validar os cenários
+def processar_e_validar(excel_file):
+    # Ler o arquivo Excel
+    df = pd.read_excel(excel_file)
+
+    # Adicionar colunas para resultados
+    df['Resultado'] = 'Pendente'
+    df['Detalhes'] = ''
+
+    # Realizar consulta no Athena para cada cenário
+    for index, row in df.iterrows():
+        # Extraindo os campos necessários diretamente do arquivo Excel
+        sigla_sistema_origem = row['Sigla Sistema Origem']
+        cod_tipo_transacao = row['Codigo Tipo Transacao Lancamento Contábil']
+        desc_tipo_transacao = row['Descricao Tipo Transacao Lancamento Contábil']
+        data_contabil = row['Data Contabil Transacao']
+        valor_transacao = row['Valor Transacao Financeira']
+        transaction_id = row['transactionid']
+
+        resultado_athena = consultar_athena(
+            sigla_sistema_origem,
+            cod_tipo_transacao,
+            desc_tipo_transacao,
+            data_contabil,
+            valor_transacao,
+            transaction_id
+        )
+
+        # Validar resultados
+        if resultado_athena is None:
+            df.at[index, 'Resultado'] = 'Não encontrado na base pof'
+        else:
+            validacao, detalhes = validar_cenario(row, resultado_athena)
+            df.at[index, 'Resultado'] = validacao
+            df.at[index, 'Detalhes'] = detalhes
+
+    return df
+
+# Função para consultar o Athena
+def consultar_athena(sigla_sistema_origem, cod_tipo_transacao, desc_tipo_transacao, data_contabil, valor_transacao,
+                     transaction_id):
+    client = boto3.client('athena', region_name='sa-east-1')
+
+    query = f"""
+    SELECT 
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_sigla_sistema_origem_s AS "Sigla Sistema Origem",
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_codigo_tipo_transacao_lancamento_contabil_s AS "Codigo Tipo Transacao Lancamento Contábil",
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_descricao_tipo_transacao_lancamento_contabil_s AS "Descricao Tipo Transacao Lancamento Contábil",
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_data_contabil_transacao_s AS "Data Contabil Transacao",
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_valor_transacao_financeira_n AS "Valor Transacao Financeira",
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_numero_identificador_origem_evento_transacao_financeira_s AS "transactionid"
+    FROM 
+        "ds_har_saida_multivisao"."har_saida_mlto"
+    WHERE 
+        txt_ctud_said_even_m_data_m_visoes_l_m_data_m_sigla_sistema_origem_s = '{sigla_sistema_origem}'
+        AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_codigo_tipo_transacao_lancamento_contabil_s = '{cod_tipo_transacao}'
+        AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_descricao_tipo_transacao_lancamento_contabil_s = '{desc_tipo_transacao}'
+        AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_data_contabil_transacao_s = '{data_contabil}'
+        AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_valor_transacao_financeira_n = '{valor_transacao}'
+        AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_numero_identificador_origem_evento_transacao_financeira_s = '{transaction_id}'
+    """
+
+    response = client.start_query_execution(
+        QueryString=query,
+        QueryExecutionContext={
+            'Database': 'ds_har_saida_multivisao'
+        },
+        ResultConfiguration={
+            'OutputLocation': 's3://meu-bucket-athena/outputs/'
+        }
+    )
+
+    query_execution_id = response['QueryExecutionId']
+
+    # Verificar status da consulta
+    status = 'RUNNING'
+    while status in ['RUNNING', 'QUEUED']:
+        response = client.get_query_execution(QueryExecutionId=query_execution_id)
+        status = response['QueryExecution']['Status']['State']
+
+    if status == 'SUCCEEDED':
+        result = client.get_query_results(QueryExecutionId=query_execution_id)
+        rows = result['ResultSet']['Rows']
+        if len(rows) > 1:
+            # Extrair dados do resultado
+            dados_athena = rows[1]['Data']
+            resultado = {
+                'Sigla Sistema Origem': dados_athena[0]['VarCharValue'],
+                'Codigo Tipo Transacao Lancamento Contábil': dados_athena[1]['VarCharValue'],
+                'Descricao Tipo Transacao Lancamento Contábil': dados_athena[2]['VarCharValue'],
+                'Data Contabil Transacao': dados_athena[3]['VarCharValue'],
+                'Valor Transacao Financeira': dados_athena[4]['VarCharValue'],
+                'transactionid': dados_athena[5]['VarCharValue']
+            }
+            return resultado
+        else:
+            return None
+    else:
+        return None
+
+# Função para validar o cenário
+def validar_cenario(row, resultado_athena):
+    detalhes = []
+    validacao = 'SUCESSO'
+
+    campos = [
+        ('Sigla Sistema Origem', 'Sigla Sistema Origem'),
+        ('Codigo Tipo Transacao Lancamento Contábil', 'Codigo Tipo Transacao Lancamento Contábil'),
+        ('Descricao Tipo Transacao Lancamento Contábil', 'Descricao Tipo Transacao Lancamento Contábil'),
+        ('Data Contabil Transacao', 'Data Contabil Transacao'),
+        ('Valor Transacao Financeira', 'Valor Transacao Financeira'),
+        ('transactionid', 'transactionid')
+    ]
+
+    for campo_excel, campo_athena in campos:
+        valor_excel = row[campo_excel]
+        valor_athena = resultado_athena[campo_athena]
+
+        if str(valor_excel) != str(valor_athena):
+            validacao = 'INVÁLIDO'
+            detalhes.append(f'{campo_excel}: {valor_excel} vs {valor_athena}')
+        else:
+            detalhes.append(f'{campo_excel}: OK')
+
+    return validacao, ', '.join(detalhes)
+
+
+if __name__ == '__main__':
+    upload_file()
