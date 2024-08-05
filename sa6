@@ -1,0 +1,96 @@
+import json
+import polars as pl
+import os
+import pandas as pd
+
+# Caminho para o diretório contendo os arquivos JSON
+caminho_diretorio = "caminho/do/diretorio"  # Substitua pelo caminho correto
+
+# Caminho para o arquivo Excel
+caminho_excel = "caminho/do/arquivo/excel.xlsx"  # Substitua pelo caminho correto
+
+# Nome da coluna que contém os transctionid no arquivo Excel
+nome_coluna_excel = "transctionid"
+
+# Função para extrair dados dos JSONs
+def extrair_dados_de_arquivo_json(caminho_arquivo):
+    data = []
+    try:
+        with open(caminho_arquivo, 'r', encoding='utf-8') as arquivo:
+            json_lines = arquivo.readlines()
+
+            for line in json_lines:
+                try:
+                    # Parse o JSON
+                    json_data = json.loads(line)
+                    # Extraindo informações necessárias
+                    transctionid = json_data.get("transctionid", "")
+                    numero_conta_chpras = json_data["data"].get("numero_conta_chpras", "")
+                    codigo_tipo_transacao_cartao_branco = json_data["data"].get("codigo_tipo_transacao_cartao_branco", "")
+                    vaor_transcao_cartao_credito = sum(
+                        float(financeiro.get("vaor_transcao_cartao_credito", 0))
+                        for financeiro in json_data["data"].get("dados_financeiros_transacao", [])
+                    )
+                    data_hora_transacao = json_data["data"].get("data_hora_transacao", "")
+                    data_hora_recepcao_evento = json_data.get("data_hora_recepcao_evento", "")
+
+                    # Armazenar em lista
+                    data.append({
+                        "transctionid": transctionid,
+                        "numero_conta_chpras": numero_conta_chpras,
+                        "codigo_tipo_transacao_cartao_branco": codigo_tipo_transacao_cartao_branco,
+                        "vaor_transcao_cartao_credito": vaor_transcao_cartao_credito,
+                        "data_hora_transacao": data_hora_transacao,
+                        "data_hora_recepcao_evento": data_hora_recepcao_evento,
+                    })
+                except json.JSONDecodeError as e:
+                    print(f"Erro ao decodificar JSON no arquivo {caminho_arquivo}: {e}")
+                    continue
+    except Exception as e:
+        print(f"Erro ao ler o arquivo {caminho_arquivo}: {e}")
+    return data
+
+# Lista para armazenar dados extraídos de todos os arquivos
+dados_todos_arquivos = []
+
+# Percorrer todos os arquivos no diretório
+for arquivo_nome in os.listdir(caminho_diretorio):
+    if arquivo_nome.endswith('.json'):  # Verificar se é um arquivo JSON
+        caminho_arquivo = os.path.join(caminho_diretorio, arquivo_nome)
+        dados_extraidos = extrair_dados_de_arquivo_json(caminho_arquivo)
+        dados_todos_arquivos.extend(dados_extraidos)
+
+# Criação do DataFrame usando Polars
+df_csv = pl.DataFrame(dados_todos_arquivos)
+
+# Verificar as colunas do DataFrame
+print("Colunas do DataFrame CSV:", df_csv.columns)
+
+# Carregar o arquivo Excel usando pandas
+df_excel = pd.read_excel(caminho_excel)
+
+# Verificar as colunas do DataFrame Excel
+print("Colunas do DataFrame Excel:", df_excel.columns)
+
+# Extrair a coluna transctionid do Excel
+transctionid_excel = df_excel[nome_coluna_excel].dropna().astype(str)
+
+# Verificar se a coluna transctionid está presente
+if "transctionid" not in df_csv.columns:
+    raise ValueError("A coluna 'transctionid' não foi encontrada no DataFrame CSV.")
+
+# Converte a coluna transctionid do DataFrame Polars para uma lista
+transctionid_csv = df_csv.select("transctionid").to_series().to_list()
+
+# Verificar alguns valores da coluna transctionid
+print("Exemplo de transctionid do CSV:", transctionid_csv[:5])
+print("Exemplo de transctionid do Excel:", transctionid_excel.head().tolist())
+
+# Filtrar o DataFrame do Polars para incluir apenas transctionid que estão no Excel
+df_filtrado = df_csv.filter(pl.col("transctionid").is_in(transctionid_excel))
+
+# Exibir o DataFrame filtrado
+print(df_filtrado)
+
+# Salvar o DataFrame filtrado em um novo arquivo CSV
+df_filtrado.write_csv("dados_filtrados.csv")
