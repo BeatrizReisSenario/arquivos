@@ -1,0 +1,56 @@
+import json
+import polars as pl
+
+# Simulando a leitura de um arquivo com múltiplos JSONs por linha
+json_string = """
+{"datacontentype":"appilcation/json","data_hora_recepcao_evento":"2.0","id":"27398249647412783627527","id_dw6":"8374384b398x8bdddy8byd","correlation_dw6":"3943bx7837b483b83","namespace":"br.com.blabla","offset":873266,"partition":2,"reciclagem":false,"service_name":"br.com.blabla","specversion":"0.1","time":"2024-08-22  - 03:59:47","topico":"cartoes-transacao_processada","transctionid":"927381264748175","type":"br.com.blabla","data":{"numero_conta_chpras":"62356243624","teste":"teste","teste1":"teste","teste2":"teste","teste3":"teste","teste4":"teste","teste5":"teste","codigo_tipo_transacao_cartao_branco":"101","teste6":"teste","teste7":"teste","teste8":"teste","teste9":"teste","teste10":"teste","teste11":"teste","teste12":"teste","teste13":"teste","teste14":"teste","dados_financeiros_transacao":[{"teste15":"teste","teste16":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste17":"teste","teste18":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste19":"teste","teste20":"teste","vaor_transcao_cartao_credito":"100.00"}],"dados_taxas":[],"data_hora_transacao":"2024-08-02 16:00:00","teste21":"teste","dados_tipo_transcao":{"codigo_tipo_transcao":"101","teste30":"teste","teste31":"teste","teste32":"teste"},"codigo_identificador_cartao_credito":"3943649737463","dados_autorizacao":{"teste33":"teste","teste34":"teste","teste35":"teste","teste36":"teste"},"dados_comercicante":{"teste60":"teste","teste70":"teste","teste80":"teste","teste90":"teste","teste0":"teste","dados_categoria_comerciante":{"teste99":"teste","teste88":"teste","teste77":"teste","teste66":"teste"}}}}
+{"datacontentype":"appilcation/json","data_hora_recepcao_evento":"2.0","id":"27398249647412783627527","id_dw6":"8374384b398x8bdddy8byd","correlation_dw6":"3943bx7837b483b83","namespace":"br.com.blabla","offset":873266,"partition":2,"reciclagem":false,"service_name":"br.com.blabla","specversion":"0.1","time":"2024-08-22  - 03:59:47","topico":"cartoes-transacao_processada","transctionid":"127381264748145","type":"br.com.blabla","data":{"numero_conta_chpras":"62356243624","teste":"teste","teste1":"teste","teste2":"teste","teste3":"teste","teste4":"teste","teste5":"teste","codigo_tipo_transacao_cartao_branco":"101","teste6":"teste","teste7":"teste","teste8":"teste","teste9":"teste","teste10":"teste","teste11":"teste","teste12":"teste","teste13":"teste","teste14":"teste","dados_financeiros_transacao":[{"teste15":"teste","teste16":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste17":"teste","teste18":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste19":"teste","teste20":"teste","vaor_transcao_cartao_credito":"100.00"}],"dados_taxas":[],"data_hora_transacao":"2024-08-02 16:00:00","teste21":"teste","dados_tipo_transcao":{"codigo_tipo_transcao":"101","teste30":"teste","teste31":"teste","teste32":"teste"},"codigo_identificador_cartao_credito":"3943649737463","dados_autorizacao":{"teste33":"teste","teste34":"teste","teste35":"teste","teste36":"teste"},"dados_comercicante":{"teste60":"teste","teste70":"teste","teste80":"teste","teste90":"teste","teste0":"teste","dados_categoria_comerciante":{"teste99":"teste","teste88":"teste","teste77":"teste","teste66":"teste"}}}}
+{"datacontentype":"appilcation/json","data_hora_recepcao_evento":"2.0","id":"27398249647412783627527","id_dw6":"8374384b398x8bdddy8byd","correlation_dw6":"3943bx7837b483b83","namespace":"br.com.blabla","offset":873266,"partition":2,"reciclagem":false,"service_name":"br.com.blabla","specversion":"0.1","time":"2024-08-22  - 03:59:47","topico":"cartoes-transacao_processada","transctionid":"227381264748199","type":"br.com.blabla","data":{"numero_conta_chpras":"62356243624","teste":"teste","teste1":"teste","teste2":"teste","teste3":"teste","teste4":"teste","teste5":"teste","codigo_tipo_transacao_cartao_branco":"101","teste6":"teste","teste7":"teste","teste8":"teste","teste9":"teste","teste10":"teste","teste11":"teste","teste12":"teste","teste13":"teste","teste14":"teste","dados_financeiros_transacao":[{"teste15":"teste","teste16":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste17":"teste","teste18":"teste","vaor_transcao_cartao_credito":"100.00"},{"teste19":"teste","teste20":"teste","vaor_transcao_cartao_credito":"100.00"}],"dados_taxas":[],"data_hora_transacao":"2024-08-02 16:00:00","teste21":"teste","dados_tipo_transcao":{"codigo_tipo_transcao":"101","teste30":"teste","teste31":"teste","teste32":"teste"},"codigo_identificador_cartao_credito":"3943649737463","dados_autorizacao":{"teste33":"teste","teste34":"teste","teste35":"teste","teste36":"teste"},"dados_comercicante":{"teste60":"teste","teste70":"teste","teste80":"teste","teste90":"teste","teste0":"teste","dados_categoria_comerciante":{"teste99":"teste","teste88":"teste","teste77":"teste","teste66":"teste"}}}}
+"""
+
+# Dividindo a string em linhas para processar cada JSON separadamente
+json_lines = json_string.strip().split('\n')
+
+# Função para extrair dados dos JSONs
+def extrair_dados(json_lines):
+    data = []
+    for line in json_lines:
+        try:
+            # Parse o JSON
+            json_data = json.loads(line)
+            # Extraindo informações necessárias
+            transctionid = json_data.get("transctionid", "")
+            numero_conta_chpras = json_data["data"].get("numero_conta_chpras", "")
+            codigo_tipo_transacao_cartao_branco = json_data["data"].get("codigo_tipo_transacao_cartao_branco", "")
+            vaor_transcao_cartao_credito = sum(
+                float(financeiro.get("vaor_transcao_cartao_credito", 0))
+                for financeiro in json_data["data"].get("dados_financeiros_transacao", [])
+            )
+            data_hora_transacao = json_data["data"].get("data_hora_transacao", "")
+            data_hora_recepcao_evento = json_data.get("data_hora_recepcao_evento", "")
+            
+            # Armazenar em lista
+            data.append({
+                "transctionid": transctionid,
+                "numero_conta_chpras": numero_conta_chpras,
+                "codigo_tipo_transacao_cartao_branco": codigo_tipo_transacao_cartao_branco,
+                "vaor_transcao_cartao_credito": vaor_transcao_cartao_credito,
+                "data_hora_transacao": data_hora_transacao,
+                "data_hora_recepcao_evento": data_hora_recepcao_evento,
+            })
+        except json.JSONDecodeError as e:
+            print(f"Erro ao decodificar JSON: {e}")
+            continue
+    return data
+
+# Extração dos dados
+dados_extraidos = extrair_dados(json_lines)
+
+# Criação do DataFrame usando Polars
+df = pl.DataFrame(dados_extraidos)
+
+# Exibindo o DataFrame
+print(df)
+
+# Salvando em CSV se necessário
+df.write_csv("dados_extraidos.csv")
