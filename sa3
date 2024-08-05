@@ -1,0 +1,91 @@
+import json
+import polars as pl
+import os
+import pandas as pd
+
+# Caminho para o diretório contendo os arquivos JSON
+caminho_diretorio = "caminho/do/diretorio"  # Substitua pelo caminho correto
+
+# Caminho para o arquivo Excel
+caminho_excel = "caminho/do/arquivo/excel.xlsx"  # Substitua pelo caminho correto
+
+# Nome da coluna que contém os transctionid no arquivo Excel
+nome_coluna_excel = "transctionid"
+
+# Função para extrair dados dos JSONs
+def extrair_dados_de_arquivo_json(caminho_arquivo):
+    data = []
+    try:
+        with open(caminho_arquivo, 'r', encoding='utf-8') as arquivo:
+            json_lines = arquivo.readlines()
+
+            for line in json_lines:
+                try:
+                    # Parse o JSON
+                    json_data = json.loads(line)
+                    # Extraindo informações necessárias
+                    transctionid = json_data.get("transctionid", "")
+                    numero_conta_chpras = json_data["data"].get("numero_conta_chpras", "")
+                    codigo_tipo_transacao_cartao_branco = json_data["data"].get("codigo_tipo_transacao_cartao_branco", "")
+                    vaor_transcao_cartao_credito = sum(
+                        float(financeiro.get("vaor_transcao_cartao_credito", 0))
+                        for financeiro in json_data["data"].get("dados_financeiros_transacao", [])
+                    )
+                    data_hora_transacao = json_data["data"].get("data_hora_transacao", "")
+                    data_hora_recepcao_evento = json_data.get("data_hora_recepcao_evento", "")
+
+                    # Armazenar em lista
+                    data.append({
+                        "transctionid": transctionid,
+                        "numero_conta_chpras": numero_conta_chpras,
+                        "codigo_tipo_transacao_cartao_branco": codigo_tipo_transacao_cartao_branco,
+                        "vaor_transcao_cartao_credito": vaor_transcao_cartao_credito,
+                        "data_hora_transacao": data_hora_transacao,
+                        "data_hora_recepcao_evento": data_hora_recepcao_evento,
+                    })
+                except json.JSONDecodeError as e:
+                    print(f"Erro ao decodificar JSON no arquivo {caminho_arquivo}: {e}")
+                    continue
+    except Exception as e:
+        print(f"Erro ao ler o arquivo {caminho_arquivo}: {e}")
+    return data
+
+# Lista para armazenar dados extraídos de todos os arquivos
+dados_todos_arquivos = []
+
+# Percorrer todos os arquivos no diretório
+for arquivo_nome in os.listdir(caminho_diretorio):
+    if arquivo_nome.endswith('.json'):  # Verificar se é um arquivo JSON
+        caminho_arquivo = os.path.join(caminho_diretorio, arquivo_nome)
+        dados_extraidos = extrair_dados_de_arquivo_json(caminho_arquivo)
+        dados_todos_arquivos.extend(dados_extraidos)
+
+# Criação do DataFrame usando Polars
+df_csv = pl.DataFrame(dados_todos_arquivos)
+
+# Carregar o arquivo Excel usando pandas
+df_excel = pd.read_excel(caminho_excel)
+
+# Extrair a coluna transctionid do Excel
+transctionid_excel = df_excel[nome_coluna_excel].dropna().astype(str)
+
+# Converte a coluna transctionid do DataFrame Polars para uma lista
+transctionid_csv = df_csv.select("transctionid").to_series().to_list()
+
+# Criar uma nova lista que guarda se os transctionid do Excel estão no CSV
+comparacao_resultados = []
+
+for trans_id in transctionid_excel:
+    if trans_id in transctionid_csv:
+        comparacao_resultados.append({"transctionid": trans_id, "existe_no_csv": "Sim"})
+    else:
+        comparacao_resultados.append({"transctionid": trans_id, "existe_no_csv": "Não"})
+
+# Criar DataFrame do Polars com os resultados da comparação
+df_resultado = pl.DataFrame(comparacao_resultados)
+
+# Exibir o DataFrame resultado
+print(df_resultado)
+
+# Salvar o DataFrame resultado em um novo arquivo CSV
+df_resultado.write_csv("resultado_comparacao.csv")
