@@ -1,0 +1,302 @@
+from datetime import date
+import os
+import logging
+from io import BytesIO
+from uuid import uuid4
+
+import awswrangler as wr
+from typing import List, Dict, Any
+
+import boto3
+import pandas as pd
+
+
+
+class Automation:
+    # Constantes de consulta SQL
+    ATHENA_QUERY = """
+    SELECT 
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_data_hora_evento_ocorrido_s,
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_sigla_sistema_origem_s AS "Sigla Sistema Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_codigo_tipo_transacao_lancamento_contabil_s AS "Codigo Tipo Transacao Lancamento Contabil",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_descricao_tipo_transacao_lancamento_contabil_s AS "Descricao Tipo Transacao Lancamento Contabil",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_origem_l_m_codigo_tipo_empresa_conglomerado_s AS "Codigo Tipo Empresa Conglomerado Tipo Transacao Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_origem_l_m_codigo_empresa_conglomerado_s AS "Codigo Empresa Conglomerado Tipo Transacao Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_origem_l_m_codigo_departamento_empresa_s AS "Codigo Departamento Empresa Tipo Transacao Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_origem_l_m_codigo_conta_contabil_origem_operacao_financeira_s AS "Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_destino_l_m_codigo_tipo_empresa_conglomerado_s AS "Codigo Tipo Empresa Conglomerado Tipo Transacao Destino",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_destino_l_m_codigo_empresa_conglomerado_s AS "Codigo Empresa Conglomerado Tipo Transacao Destino",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_destino_l_m_codigo_departamento_empresa_s AS "Codigo Departamento Empresa Tipo Transacao Destino",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_destino_l_m_codigo_conta_contabil_destino_operacao_financeira_s AS "Codigo Conta-Contabil Destino Operacao-Financeira",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_origem_l_m_codigo_centro_custo_s AS "Codigo Centro-Custo Origem",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_destino_l_m_codigo_centro_custo_s AS "Codigo Centro-Custo Destino",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_data_hora_evento_ocorrido_s AS "Data Hora Evento Ocorrido",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_data_contabil_transacao_s AS "Data Contabil Transacao",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_valor_transacao_financeira_n AS "Valor Transacao Financeira",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_numero_identificador_origem_evento_transacao_financeira_s AS "transactionid",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_codigo_identificacao_evento_s AS "id",
+      txt_ctud_said_even_m_data_m_visoes_l_m_data_m_codigo_contrato_negociado_s AS "codigo_contrato_negociado",
+      cod_esqu_csum_even_nego_s AS "namespace"
+    FROM
+      "ds_har_saida_multivisao"."har_saida_mlto"
+    WHERE
+      (date_parse(concat(ingest_year, '-', ingest_month, '-', ingest_day), '%Y-%m-%d') >= DATE_ADD('day', -2, DATE(current_date)))
+      AND (txt_ctud_said_even_m_data_m_visoes_l_m_nome_visao_s = 'lancamento-roteirizado')
+      AND cod_esqu_csum_even_nego_s = '{namespace}'
+      AND (
+          txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_numero_identificador_origem_evento_transacao_financeira_s = '{transaction_id}'
+          OR txt_ctud_said_even_m_data_m_visoes_l_m_data_m_header_evento_origem_m_codigo_identificacao_evento_s = '{id}'
+          OR txt_ctud_said_even_m_data_m_visoes_l_m_data_m_codigo_contrato_negociado_s = '{codigo_contrato_negociado}'
+      )
+      AND txt_ctud_said_even_m_data_m_visoes_l_m_data_m_transaction_type_l_m_codigo_tipo_transacao_lancamento_contabil_s != 'INTDEP'
+    """
+
+    def __init__(self) -> None:
+        # Inicializa a classe com a data atual
+        today = date.today()
+        self.message = ''
+        self.ano = today.year
+        self.mes = today.month
+        self.dia = today.day
+
+    @staticmethod
+    def search_athena(
+            id: str,
+            namespace: str,
+            transaction_id: str,
+            codigo_contrato_negociado: str
+    ) -> dict:
+        """
+        Executa uma busca em Athena com base nos parâmetros fornecidos.
+
+        :param id: Identificação do evento.
+        :param namespace: Namespace do evento.
+        :param transaction_id: Identificador da transação.
+        :param codigo_contrato_negociado: Código do contrato negociado.
+        :return: Dicionário contendo a mensagem, DataFrame e número de linhas encontradas.
+        """
+        # Construção da consulta Athena
+        query = Automation.ATHENA_QUERY.format(
+            id=id,
+            namespace=namespace,
+            transaction_id=transaction_id,
+            codigo_contrato_negociado=codigo_contrato_negociado
+        )
+
+        # Executa a consulta Athena e lê os resultados para um DataFrame
+        df = wr.athena.read_sql_query(
+            query,
+            database='ds_har_saida_multivisao',
+            workgroup="wkg_multivisao",
+            kms_key=os.environ['KMS_KEY_ARN'],
+            ctas_approach=False
+        )
+
+        # Determina a mensagem e o número de linhas com base na presença de dados
+        if not df.empty:
+            message = 'Entrada encontrada em Athena'
+            rows = df.shape[0]
+        else:
+            message = 'Entrada não encontrada em Athena'
+            rows = 0
+
+        # Registra a mensagem e o DataFrame no log
+        logging.info(f"{message}. Número de linhas: {rows}")
+
+        return {
+            'message': message,
+            'df': df,
+            'rows': rows
+        }
+    def validate(athenadict: dict, cenario: dict, response: dict) -> List[Dict[str, Any]]:
+        """
+        Função para validar transações baseadas em respostas do Athena e cenários esperados.
+
+        Args:
+            athenadict (dict): Dicionário com informações do Athena.
+            cenario (dict): Dicionário contendo cenários de transação esperados.
+            response (dict): Dicionário com respostas recebidas do Athena.
+
+        Returns:
+            lista_cenario (List[Dict[str, Any]]): Lista contendo os resultados de validação para cada cenário.
+        """
+
+        # Constrói DataFrame a partir das respostas de Athena
+        def build_dataframe(response):
+            dffound = None
+            for linha in response:
+                if linha['INFO'] == 'Entrada encontrada em Athena':
+                    data_event = pd.DataFrame(linha['Dados do evento'])
+                    dffound = pd.concat([dffound, data_event]) if dffound is not None else data_event
+            return dffound
+
+        # Valida se a quantidade de transações está correta
+        def validate_transaction_count(rows, tts, response_validation):
+            if rows > tts:
+                return {
+                    "Status": f"ERRO: Transações além do esperado para o cenário. Esperadas: {tts}, retornadas: {rows}"}
+            elif rows < tts:
+                return {
+                    "Status": f"ERRO: Transações abaixo do esperado para o cenário. Esperadas: {tts}, retornadas: {rows}"}
+            else:
+                logging.info("Quantidade de transações conforme esperado.")
+                return {
+                    "Status": "OK: Quantidade de transações conforme esperado."}
+
+        # Realiza a validação para cada campo individualmente
+        def validate_field(tt_values, field_name, expected_value, field_description):
+            if (tt_values is not None) and (expected_value == tt_values[field_name][0]):
+                return {field_description: expected_value, "status": f"{field_description}: OK"}
+            else:
+                logging.info(f"{field_description} diferente do esperado.")
+                return {field_description: expected_value, "status": f"ERRO: {field_description} diferente do esperado."}
+
+        # Função para encontrar o tipo de transação
+        def find_transaction_type(values, dffound, cenario_key):
+            tt_found = "true" if values['transaction_type'] in dffound['Codigo Tipo Transacao Lancamento Contabil'].values else "false"
+            transaction_status = "Encontrada" if tt_found == "true" else "não esperada"
+            transaction = {
+                "transaction_type": values['transaction_type'], "status": f"Transaction Type: {transaction_status}"}
+            response_validation[cenario_key].append(transaction)
+            logging.info(f"transaction_type {transaction_status}", response_validation)
+            return tt_found
+
+        # Inicializa variáveis
+        dffound = build_dataframe(response)
+        response_validation = {}
+        lista_cenario = []
+
+        if dffound is None:
+            return [f"Nao foi encontrado nenhum registro no Athena para este cenario: {cenario}"]
+
+        rows = dffound.shape[0]
+        cenario_key = response[0]['cenario']
+        response_validation[cenario_key] = []
+
+        # Quantidade de transaction_types esperada
+        tts = len(cenario['transaction_types'])
+
+        # Valida quantidade de transações
+        response_validation['TTs'] = validate_transaction_count(rows, tts, response_validation)
+
+        # Itera sobre cada tipo de transação esperado no cenário
+        for values in cenario['transaction_types']:
+            # Encontra transação
+            tt_found = find_transaction_type(values, dffound, cenario_key)
+
+            # Cria DataFrame para transações encontradas
+            tt_values = dffound[dffound['Codigo Tipo Transacao Lancamento Contabil'] == values['transaction_type']] if tt_found == "true" else None
+
+            # Valida campos de destino e origem
+            fields_to_validate = {
+                'Codigo Departamento Empresa Tipo Transacao Destino': ("destino", "codigo_departamento_empresa", "Codigo Departamento Empresa Destino"),
+                'Codigo Tipo Empresa Conglomerado Tipo Transacao Destino': ("destino", "codigo_tipo_empresa_conglomerado", "Codigo Tipo Empresa Conglomerado Destino"),
+                'Codigo Empresa Conglomerado Tipo Transacao Destino': ("destino", "codigo_empresa_conglomerado", "Codigo Empresa Conglomerado Tipo Transacao Destino"),
+                'Codigo Departamento Empresa Tipo Transacao Origem': ("origem", "codigo_departamento_empresa", "Codigo Departamento Empresa Origem"),
+                'Codigo Tipo Empresa Conglomerado Tipo Transacao Origem': ("origem", "codigo_tipo_empresa_conglomerado", "Codigo Tipo Empresa Conglomerado Origem"),
+                'Codigo Empresa Conglomerado Tipo Transacao Origem': ("origem", "codigo_empresa_conglomerado", "Codigo Empresa Conglomerado Origem"),
+                'Codigo Conta-Contabil Destino Operacao-Financeira': ("destino", "codigo_conta_contabil_destino_operacao_financeira", "Codigo Conta-Contabil Destino Operacao-Financeira"),
+                'Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem': ("origem", "codigo_conta_contabil_origem_operacao_financeira", "Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem")
+            }
+
+            for field_name, (key, sub_key, field_description) in fields_to_validate.items():
+                expected_value = values[key][sub_key]
+                field_result = validate_field(tt_values, field_name, expected_value, field_description)
+                response_validation[cenario_key].append(field_result)
+
+            # Armazena informações do Athena
+            athena_informations = {
+                "Sigla Sistema Origem": tt_values['Sigla Sistema Origem'][0] if tt_found != 'false' else "",
+                "Descricao Tipo Transacao Lancamento Contabil": tt_values['Descricao Tipo Transacao Lancamento Contabil'][0] if tt_found != 'false' else "",
+                "Codigo Centro-Custo Origem": tt_values['Codigo Centro-Custo Origem'][0] if tt_found != 'false' else "",
+                "Codigo Centro-Custo Destino": tt_values['Codigo Centro-Custo Destino'][0] if tt_found != 'false' else "",
+                "Data Hora Evento Ocorrido": tt_values['Data Hora Evento Ocorrido'][0] if tt_found != 'false' else "",
+                "Data Contabil Transacao": tt_values['Data Contabil Transacao'][0] if tt_found != 'false' else "",
+                "Valor Transacao Financeira": tt_values['Valor Transacao Financeira'][0] if tt_found != 'false' else ""
+            }
+            response_validation[cenario_key].append(athena_informations)
+            lista_cenario.append(response_validation)
+
+        logging.info(lista_cenario)
+        return lista_cenario
+
+    def gera_arquivo(self, event: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Função para gerar um arquivo Excel a partir de dados de eventos e armazená-lo em um bucket S3.
+
+        Args:
+            event (List[Dict[str, Any]]): Lista de dicionários contendo dados de eventos para processar.
+
+        Returns:
+            Dict[str, Any]: Dicionário com a URL do arquivo armazenado no S3 ou o conteúdo do DataFrame.
+        """
+
+        # Inicializa boto3 e variáveis necessárias
+        s3_client = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                                 aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
+        url_s3 = os.getenv('URL_S3')
+        bucket = os.getenv('BUCKET')
+        dfexcel = pd.DataFrame()
+
+        # Processa cada item do evento
+        for item in event:
+            cenario = item['cenario']
+            dados = item['response']
+
+            # Verifica se dados não foram encontrados
+            if not isinstance(dados, list) or 'Nao foi encontrado nenhum registro no Athena' in dados:
+                dfexcel = pd.concat([dfexcel, pd.DataFrame([{'cenario': cenario, 'Status': 'NÃO APROVADO',
+                                                             'Motivo': 'nenhum resultado encontrado no Athena'}])])
+            else:
+                # Processa dados encontrados e os adiciona ao DataFrame
+                for dado in dados:
+                    for key, value in dado.items():
+                        if key != 'TTs':
+                            data = {
+                                "cenario": cenario,
+                                "transaction_type": value.get('transaction_type', ''),
+                                "codigo_departamento_empresa_destino": value.get("Codigo Departamento Empresa Destino",
+                                                                                 ''),
+                                "codigo_tipo_empresa_conglomerado_destino": value.get(
+                                    "Codigo Tipo Empresa Conglomerado Destino", ''),
+                                "codigo_empresa_conglomerado_destino": value.get("Codigo Empresa Conglomerado Destino",
+                                                                                 ''),
+                                "codigo_departamento_empresa_origem": value.get("Codigo Departamento Empresa Origem",
+                                                                                ''),
+                                "codigo_tipo_empresa_conglomerado_origem": value.get(
+                                    "Codigo Tipo Empresa Conglomerado Origem", ''),
+                                "codigo_empresa_conglomerado_origem": value.get("Codigo Empresa Conglomerado Origem",
+                                                                                ''),
+                                "codigo_conta_contabil_destino_operacao_financeira": value.get(
+                                    "Codigo Conta-Contabil Destino Operacao-Financeira", ''),
+                                "codigo_conta_contabil_origem_operacao_financeira": value.get(
+                                    "Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem", ''),
+                                "Sigla Sistema Origem": value.get("Sigla Sistema Origem", ''),
+                                "Descricao Tipo Transacao Lancamento Contabil": value.get(
+                                    "Descricao Tipo Transacao Lancamento Contabil", ''),
+                                "Codigo Centro-Custo Origem": value.get("Codigo Centro-Custo Origem", ''),
+                                "Codigo Centro-Custo Destino": value.get("Codigo Centro-Custo Destino", ''),
+                                "Data Hora Evento Ocorrido": value.get("Data Hora Evento Ocorrido", ''),
+                                "Data Contabil Transacao": value.get("Data Contabil Transacao", ''),
+                                "Valor Transacao Financeira": value.get("Valor Transacao Financeira", ''),
+                                "status": value.get("status", '')
+                            }
+                            dfexcel = pd.concat([dfexcel, pd.DataFrame([data])])
+
+        # Define status de aprovação
+        dfexcel['Status'] = dfexcel.apply(lambda x: 'APROVADO' if 'OK' in x['status'] else 'NÃO APROVADO', axis=1)
+
+        # Salva DataFrame em arquivo Excel
+        file_buffer = BytesIO()
+        dfexcel.to_excel(file_buffer, index=False, engine='xlsxwriter')
+        file_buffer.seek(0)
+
+        # Armazena o arquivo no bucket S3 e retorna a URL
+        if url_s3:
+            file_key = f'outputs/{uuid4()}.xlsx'
+            s3_client.put_object(Bucket=bucket, Key=file_key, Body=file_buffer.getvalue())
+            file_url = f"{url_s3}/{bucket}/{file_key}"
+            return {'url': file_url}
+
+        # Retorna o conteúdo do DataFrame para download local
+        return {'content': dfexcel.to_dict(orient='records')}
