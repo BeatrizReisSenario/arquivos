@@ -1,0 +1,142 @@
+import unittest
+from unittest.mock import patch, MagicMock
+import pandas as pd
+from your_module_name import Automation  # Substitua 'your_module_name' pelo nome do arquivo onde a classe está implementada.
+
+class TestAutomation(unittest.TestCase):
+
+    @patch('your_module_name.wr.athena.read_sql_query')
+    def test_search_athena(self, mock_read_sql_query):
+        # Mockando o retorno do Athena para testes
+        mock_df = pd.DataFrame({
+            'Sigla Sistema Origem': ['Sistema A'],
+            'Codigo Tipo Transacao Lancamento Contabil': ['TT1'],
+            'Descricao Tipo Transacao Lancamento Contabil': ['Descrição A'],
+            'Codigo Tipo Empresa Conglomerado Tipo Transacao Origem': ['Tipo Empresa A'],
+            'Codigo Empresa Conglomerado Tipo Transacao Origem': ['Empresa A'],
+            'Codigo Departamento Empresa Tipo Transacao Origem': ['Depto A'],
+            'Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem': ['Conta A'],
+            'Codigo Tipo Empresa Conglomerado Tipo Transacao Destino': ['Tipo Empresa B'],
+            'Codigo Empresa Conglomerado Tipo Transacao Destino': ['Empresa B'],
+            'Codigo Departamento Empresa Tipo Transacao Destino': ['Depto B'],
+            'Codigo Conta-Contabil Destino Operacao-Financeira': ['Conta B'],
+            'Codigo Centro-Custo Origem': ['CC A'],
+            'Codigo Centro-Custo Destino': ['CC B'],
+            'Data Hora Evento Ocorrido': ['2023-01-01 12:00:00'],
+            'Data Contabil Transacao': ['2023-01-02'],
+            'Valor Transacao Financeira': [1000.00],
+            'transactionid': ['123'],
+            'id': ['abc'],
+            'codigo_contrato_negociado': ['001'],
+            'namespace': ['namespace1']
+        })
+        
+        mock_read_sql_query.return_value = mock_df
+
+        # Chamada ao método
+        result = Automation.search_athena(
+            id='abc',
+            namespace='namespace1',
+            transaction_id='123',
+            codigo_contrato_negociado='001'
+        )
+
+        # Verificação do resultado
+        self.assertEqual(result['message'], 'Entrada encontrada em Athena')
+        self.assertEqual(result['rows'], 1)
+        pd.testing.assert_frame_equal(result['df'], mock_df)
+
+    def test_validate(self):
+        # Mocking inputs
+        athenadict = {}
+        cenario = {
+            "transaction_types": [
+                {
+                    "transaction_type": "TT1",
+                    "origem": {
+                        "codigo_departamento_empresa": "Depto A",
+                        "codigo_tipo_empresa_conglomerado": "Tipo Empresa A",
+                        "codigo_empresa_conglomerado": "Empresa A",
+                        "codigo_conta_contabil_origem_operacao_financeira": "Conta A"
+                    },
+                    "destino": {
+                        "codigo_departamento_empresa": "Depto B",
+                        "codigo_tipo_empresa_conglomerado": "Tipo Empresa B",
+                        "codigo_empresa_conglomerado": "Empresa B",
+                        "codigo_conta_contabil_destino_operacao_financeira": "Conta B"
+                    }
+                }
+            ]
+        }
+        response = [
+            {
+                "INFO": "Entrada encontrada em Athena",
+                "Dados do evento": {
+                    "Sigla Sistema Origem": ["Sistema A"],
+                    "Codigo Tipo Transacao Lancamento Contabil": ["TT1"],
+                    "Descricao Tipo Transacao Lancamento Contabil": ["Descrição A"],
+                    "Codigo Tipo Empresa Conglomerado Tipo Transacao Origem": ["Tipo Empresa A"],
+                    "Codigo Empresa Conglomerado Tipo Transacao Origem": ["Empresa A"],
+                    "Codigo Departamento Empresa Tipo Transacao Origem": ["Depto A"],
+                    "Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem": ["Conta A"],
+                    "Codigo Tipo Empresa Conglomerado Tipo Transacao Destino": ["Tipo Empresa B"],
+                    "Codigo Empresa Conglomerado Tipo Transacao Destino": ["Empresa B"],
+                    "Codigo Departamento Empresa Tipo Transacao Destino": ["Depto B"],
+                    "Codigo Conta-Contabil Destino Operacao-Financeira": ["Conta B"],
+                    "Codigo Centro-Custo Origem": ["CC A"],
+                    "Codigo Centro-Custo Destino": ["CC B"],
+                    "Data Hora Evento Ocorrido": ["2023-01-01 12:00:00"],
+                    "Data Contabil Transacao": ["2023-01-02"],
+                    "Valor Transacao Financeira": [1000.00],
+                },
+                "cenario": "cenario1"
+            }
+        ]
+
+        result = Automation.validate(athenadict, cenario, response)
+
+        # Verifica se o resultado possui a validação correta
+        self.assertTrue(any("TTs" in r for r in result))
+
+    @patch('your_module_name.boto3.client')
+    def test_gera_arquivo(self, mock_boto3_client):
+        # Mocking S3 upload
+        mock_s3 = MagicMock()
+        mock_boto3_client.return_value = mock_s3
+
+        # Dados de entrada
+        event = [
+            {
+                "cenario": "cenario1",
+                "response": [
+                    {
+                        "transaction_type": "TT1",
+                        "Codigo Departamento Empresa Destino": "Depto B",
+                        "Codigo Tipo Empresa Conglomerado Destino": "Tipo Empresa B",
+                        "Codigo Empresa Conglomerado Destino": "Empresa B",
+                        "Codigo Departamento Empresa Origem": "Depto A",
+                        "Codigo Tipo Empresa Conglomerado Origem": "Tipo Empresa A",
+                        "Codigo Empresa Conglomerado Origem": "Empresa A",
+                        "Codigo Conta-Contabil Destino Operacao-Financeira": "Conta B",
+                        "Codigo Conta-Contabil Origem Operacao-Financeira Tipo Transacao Origem": "Conta A",
+                        "Sigla Sistema Origem": "Sistema A",
+                        "Descricao Tipo Transacao Lancamento Contabil": "Descrição A",
+                        "Codigo Centro-Custo Origem": "CC A",
+                        "Codigo Centro-Custo Destino": "CC B",
+                        "Data Hora Evento Ocorrido": "2023-01-01 12:00:00",
+                        "Data Contabil Transacao": "2023-01-02",
+                        "Valor Transacao Financeira": 1000.00,
+                        "status": "OK"
+                    }
+                ]
+            }
+        ]
+
+        # Chamada ao método
+        result = Automation().gera_arquivo(event)
+
+        # Verifica se a URL foi gerada corretamente
+        self.assertIn('url', result)
+
+if __name__ == '__main__':
+    unittest.main()
