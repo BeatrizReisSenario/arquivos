@@ -1,0 +1,40 @@
+from configuration.log_config import logging
+from src.automation import Automation
+import constants as c
+
+def lambda_handler(event: dict, context):
+    nome_execution = event['executionName']
+    etapa = event["etapa"]
+
+    if etapa == c.EtapaConsulta.consulta_athena:
+        cenario = event["cenario"]
+
+        if not cenario.get('validacao'):
+            cenario['validacao'] = {}
+
+        for evento in cenario['eventos']:
+            if not evento.get('validacao'):
+                evento['validacao'] = {}
+
+            id = evento.get('id')  # NOSONAR
+            transaction_id = evento.get("transaction_id")
+            namespace = evento.get("namespace")
+            codigo_contrato_negociado = evento.get("codigo_contrato_negociado")
+
+            response_athena = Automation.search_athena(
+                id,
+                namespace,
+                transaction_id,
+                codigo_contrato_negociado
+            )
+
+            evento['validacao'][c.VALIDACAO_ATHENA_DADOS] = response_athena['found_athena']
+            evento['dados_athena'] = response_athena['df'].to_dict('records')
+
+        response_validation = Automation.validate(cenario)
+        response_gera_arquivo = Automation().gera_arquivo(cenario)
+
+        return {
+            "cenario": response_gera_arquivo,
+            "status": c.Status.SUCESSO.value  # Aqui usamos a enumeração Status
+        }
