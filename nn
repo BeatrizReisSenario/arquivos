@@ -1,0 +1,49 @@
+@patch('src.automation.Automation.search_athena')
+def test_lambda_handler(self, MockAutomation):
+    mock_instance = MockAutomation.return_value
+
+    mock_instance.search_athena.return_value = {
+        'found_athena': True,
+        'df': [{'coluna': 'valor'}]
+    }
+
+    mock_instance.gera_arquivo.return_value = {'arquivo_gerado': True}
+
+    # Ajuste o retorno do método validate para refletir os parâmetros corretos
+    mock_instance.validate.return_value = True
+
+    event = {
+        'executionName': 'test_execution',
+        'etapa': c.EtapaConsulta.consulta_athena,
+        'cenario': {
+            'eventos': [
+                {
+                    'id': '123',
+                    'transaction_id': '456',
+                    'namespace': 'namespace_test',
+                    'codigo_contrato_negociado': '789'
+                }
+            ]
+        }
+    }
+
+    response = lambda_handler(event, None)
+
+    mock_instance.search_athena.assert_called_once_with(
+        '123', 'namespace_test', '456', '789'
+    )
+    
+    # Verifique se validate foi chamado com os argumentos corretos
+    mock_instance.validate.assert_called_once_with(
+        mock_instance.search_athena.return_value,
+        event['cenario'],
+        mock_instance.search_athena.return_value['found_athena']
+    )
+    
+    mock_instance.gera_arquivo.assert_called_once_with(event['cenario'])
+
+    expected_response = {
+        "cenario": {'arquivo_gerado': True},
+        "status": c.Status.SUCESSO.value
+    }
+    self.assertEqual(response, expected_response)
