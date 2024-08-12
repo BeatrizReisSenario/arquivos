@@ -1,0 +1,57 @@
+import unittest
+from unittest.mock import patch, MagicMock
+from your_module import lambda_handler  # Substitua por onde a função lambda_handler está localizada
+import constants as c
+
+class TestLambdaHandler(unittest.TestCase):
+
+    @patch('your_module.Automation')
+    def test_lambda_handler(self, MockAutomation):
+        # Mocking the Automation class and its methods
+        mock_instance = MockAutomation.return_value
+
+        # Ajustando o retorno da função search_athena para retornar valores corretos
+        mock_instance.search_athena.return_value = {
+            'found_athena': True,
+            'df': MagicMock(to_dict=lambda _: [{'coluna': 'valor'}])
+        }
+
+        # Mocking other methods
+        mock_instance.gera_arquivo.return_value = {'arquivo_gerado': True}
+        mock_instance.validate.return_value = True
+
+        # Definindo o evento de teste
+        event = {
+            'executionName': 'test_execution',
+            'etapa': c.EtapaConsulta.consulta_athena,
+            'cenario': {
+                'eventos': [
+                    {
+                        'id': '123',
+                        'transaction_id': '456',
+                        'namespace': 'namespace_test',
+                        'codigo_contrato_negociado': '789'
+                    }
+                ]
+            }
+        }
+
+        # Chamando a função lambda_handler
+        response = lambda_handler(event, None)
+
+        # Verificando se os métodos da classe Automation foram chamados corretamente
+        MockAutomation().search_athena.assert_called_once_with(
+            '123', 'namespace_test', '456', '789'
+        )
+        MockAutomation().validate.assert_called_once_with(event['cenario'])
+        MockAutomation().gera_arquivo.assert_called_once_with(event['cenario'])
+
+        # Verificando a resposta da função
+        expected_response = {
+            "cenario": {'arquivo_gerado': True},
+            "status": c.Status.SUCESSO.value
+        }
+        self.assertEqual(response, expected_response)
+
+if __name__ == '__main__':
+    unittest.main()
