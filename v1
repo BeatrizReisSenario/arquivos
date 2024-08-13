@@ -1,0 +1,76 @@
+import json
+import boto3
+from boto3.dynamodb.types import TypeSerializer, TypeDeserializer
+
+def dynamodb_to_dict(item):
+    """Converte um item DynamoDB serializado em um dicionário Python padrão."""
+    if isinstance(item, dict):
+        if "S" in item:  # String
+            return item["S"]
+        elif "N" in item:  # Number
+            return int(item["N"])
+        elif "M" in item:  # Map (dicionário)
+            return {key: dynamodb_to_dict(value) for key, value in item["M"].items()}
+        elif "L" in item:  # List (lista)
+            return [dynamodb_to_dict(i) for i in item["L"]]
+        elif "BOOL" in item:  # Boolean
+            return item["BOOL"]
+        elif "NULL" in item:  # Null
+            return None
+        else:
+            raise ValueError(f"Tipo DynamoDB não suportado: {item}")
+    return item
+
+def make_hashable(item):
+    """Converte dicionários e listas recursivamente em tipos hashable."""
+    if isinstance(item, dict):
+        return frozenset((key, make_hashable(value)) for key, value in item.items())
+    elif isinstance(item, list):
+        return tuple(make_hashable(x) for x in item)
+    elif isinstance(item, set):
+        return frozenset(make_hashable(x) for x in item)
+    elif isinstance(item, (frozenset, tuple)):
+        return item
+    else:
+        return item
+
+def serialize_and_deserialize(file_paths):
+    """Carrega, serializa e desserializa arquivos JSON do DynamoDB."""
+    ts = TypeSerializer()
+    td = TypeDeserializer()
+
+    # Carregar o arquivo JSON sumarizado
+    with open(file_paths['sumarizado'], 'r') as f:
+        json_sumarizado = json.load(f)
+    
+    # Carregar os arquivos JSON apartados
+    json_apartados = []
+    for filename in file_paths['apartados']:
+        with open(filename, 'r') as f:
+            json_apartados.extend(json.load(f))
+
+    # Converter a estrutura do DynamoDB para dicionários comuns e transformar em itens hashable
+    set_sumarizado = {make_hashable(dynamodb_to_dict(td.deserialize(ts.serialize(dynamodb_to_dict(item))))) for item in json_sumarizado}
+
+    # Verificar cada item nos arquivos apartados contra o arquivo sumarizado
+    itens_faltantes = []
+    for item in json_apartados:
+        if make_hashable(dynamodb_to_dict(td.deserialize(ts.serialize(dynamodb_to_dict(item))))) not in set_sumarizado:
+            itens_faltantes.append(item)
+
+    # Resultados
+    if not itens_faltantes:
+        print("Todos os itens dos arquivos apartados estão presentes no arquivo sumarizado.")
+    else:
+        print("Os seguintes itens estão faltando no arquivo sumarizado:")
+        for item in itens_faltantes:
+            print(item)
+
+# Caminho para os arquivos JSON do DynamoDB
+file_paths = {
+    'sumarizado': 'caminho/para/sua/pasta/sumarizado.json',
+    'apartados': ['caminho/para/sua/pasta/apartado1.json', 'caminho/para/sua/pasta/apartado2.json', 'caminho/para/sua/pasta/apartado3.json']
+}
+
+# Executar a função para serializar e desserializar
+serialize_and_deserialize(file_paths)
