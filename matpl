@@ -1,54 +1,84 @@
 import pandas as pd
-import tkinter as tk
-from tkinter import filedialog
-from matplotlib import pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+from flask import Flask, request, send_file
+import os
 
-# Função para carregar o arquivo CSV
-def carregar_arquivo():
-    file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
-    if file_path:
-        df = pd.read_csv(file_path)
-        processar_dados(df)
+app = Flask(__name__)
 
-# Função para processar os dados e gerar o gráfico
-def processar_dados(df):
-    # Classificar por 'conta' e 'data_contabil_referencia'
+@app.route('/')
+def upload_file():
+    return '''
+    <html>
+    <body>
+        <h1>Upload de Arquivo CSV</h1>
+        <form action="/process" method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".csv">
+            <input type="submit" value="Upload">
+        </form>
+    </body>
+    </html>
+    '''
+
+@app.route('/process', methods=['POST'])
+def process_file():
+    file = request.files['file']
+    
+    # Ler o arquivo CSV
+    df = pd.read_csv(file)
+
+    # Garantir que 'data_contabil_referencia' seja do tipo datetime
     df['data_contabil_referencia'] = pd.to_datetime(df['data_contabil_referencia'])
-    df = df.sort_values(by=['conta', 'data_contabil_referencia'])
+
+    # Ordenar os dados por "conta" e "data_contabil_referencia"
+    df_sorted = df.sort_values(by=['conta', 'data_contabil_referencia'], ascending=[True, True])
+
+    # Calcular a diferença contábil
+    df_sorted['diferenca_contabil'] = df_sorted['saldo_carteira'] - df_sorted['saldo_contabil']
+
+    # Obter o último registro por conta (última data_contabil_referencia)
+    last_records = df_sorted.groupby('conta').tail(1)
+
+    # Salvar o arquivo ordenado e filtrado
+    sorted_csv = 'sorted_data.csv'
+    last_records.to_csv(sorted_csv, index=False)
+
+    # Gerar um gráfico de saldo por conta com a última data_contabil_referencia
+    plt.figure(figsize=(10,6))
+
+    for conta, conta_data in last_records.groupby('conta'):
+        plt.bar(conta, conta_data['saldo_carteira'], label=f'Conta {conta} - Saldo Carteira', color='blue', alpha=0.7)
+        plt.bar(conta, conta_data['saldo_contabil'], label=f'Conta {conta} - Saldo Contábil', color='green', alpha=0.7)
+        plt.bar(conta, conta_data['diferenca_contabil'], label=f'Conta {conta} - Diferença', color='red', alpha=0.7)
+
+    plt.title('Saldos e Diferença por Conta (Última Data Contábil)')
+    plt.xlabel('Conta')
+    plt.ylabel('Valores (R$)')
+    plt.legend(loc='upper left')
     
-    # Obter a última data por conta
-    last_records = df.groupby('conta').tail(1)
-    
-    # Exibir gráfico
-    gerar_grafico(last_records)
+    # Salvar o gráfico como imagem
+    graph_image = 'produto_grafico.png'
+    plt.savefig(graph_image)
 
-# Função para gerar o gráfico
-def gerar_grafico(df):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Gerar gráfico de barras com saldo_carteira, saldo_contabil e diferenca_contabil
-    ax.bar(df['conta'], df['saldo_carteira'], label='Saldo Carteira', color='blue', alpha=0.7)
-    ax.bar(df['conta'], df['saldo_contabil'], label='Saldo Contábil', color='green', alpha=0.7)
-    ax.bar(df['conta'], df['diferenca_contabil'], label='Diferença Contábil', color='red', alpha=0.7)
-    
-    ax.set_xlabel('Conta')
-    ax.set_ylabel('Valores')
-    ax.set_title('Última Data Contábil por Conta')
-    ax.legend()
+    # Exibir link para download do relatório e do gráfico
+    return f'''
+    <html>
+    <body>
+        <h1>Relatório e Gráfico Gerados</h1>
+        <a href="/download_csv">Download Relatório CSV</a><br><br>
+        <a href="/download_graph">Download Gráfico</a>
+    </body>
+    </html>
+    '''
 
-    # Adicionar o gráfico na interface
-    canvas = FigureCanvasTkAgg(fig, master=janela)
-    canvas.draw()
-    canvas.get_tk_widget().pack()
+@app.route('/download_csv')
+def download_csv():
+    path = "sorted_data.csv"
+    return send_file(path, as_attachment=True)
 
-# Configuração da interface gráfica
-janela = tk.Tk()
-janela.title('Análise Contábil')
+@app.route('/download_graph')
+def download_graph():
+    path = "produto_grafico.png"
+    return send_file(path, as_attachment=True)
 
-# Botão para carregar o arquivo CSV
-btn_carregar = tk.Button(janela, text="Carregar Arquivo CSV", command=carregar_arquivo)
-btn_carregar.pack()
-
-# Executar a interface
-janela.mainloop()
+if __name__ == '__main__':
+    app.run(debug=True)
