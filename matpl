@@ -1,0 +1,54 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Função para carregar o arquivo CSV
+def carregar_arquivo():
+    file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+    if file_path:
+        df = pd.read_csv(file_path)
+        processar_dados(df)
+
+# Função para processar os dados e gerar o gráfico
+def processar_dados(df):
+    # Classificar por 'conta' e 'data_contabil_referencia'
+    df['data_contabil_referencia'] = pd.to_datetime(df['data_contabil_referencia'])
+    df = df.sort_values(by=['conta', 'data_contabil_referencia'])
+    
+    # Obter a última data por conta
+    last_records = df.groupby('conta').tail(1)
+    
+    # Exibir gráfico
+    gerar_grafico(last_records)
+
+# Função para gerar o gráfico
+def gerar_grafico(df):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Gerar gráfico de barras com saldo_carteira, saldo_contabil e diferenca_contabil
+    ax.bar(df['conta'], df['saldo_carteira'], label='Saldo Carteira', color='blue', alpha=0.7)
+    ax.bar(df['conta'], df['saldo_contabil'], label='Saldo Contábil', color='green', alpha=0.7)
+    ax.bar(df['conta'], df['diferenca_contabil'], label='Diferença Contábil', color='red', alpha=0.7)
+    
+    ax.set_xlabel('Conta')
+    ax.set_ylabel('Valores')
+    ax.set_title('Última Data Contábil por Conta')
+    ax.legend()
+
+    # Adicionar o gráfico na interface
+    canvas = FigureCanvasTkAgg(fig, master=janela)
+    canvas.draw()
+    canvas.get_tk_widget().pack()
+
+# Configuração da interface gráfica
+janela = tk.Tk()
+janela.title('Análise Contábil')
+
+# Botão para carregar o arquivo CSV
+btn_carregar = tk.Button(janela, text="Carregar Arquivo CSV", command=carregar_arquivo)
+btn_carregar.pack()
+
+# Executar a interface
+janela.mainloop()
