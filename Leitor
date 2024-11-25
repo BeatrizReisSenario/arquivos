@@ -1,0 +1,88 @@
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QFileDialog, QLineEdit, QMessageBox
+)
+from fastavro.schema import load_schema
+
+
+def find_field_path(schema, target_field, path=""):
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            current_path = f"{path}['{key}']"
+            if key == target_field:
+                return current_path
+            elif isinstance(value, (dict, list)):
+                result = find_field_path(value, target_field, current_path)
+                if result:
+                    return result
+    elif isinstance(schema, list):
+        for index, item in enumerate(schema):
+            current_path = f"{path}[{index}]"
+            result = find_field_path(item, target_field, current_path)
+            if result:
+                return result
+    return None
+
+
+class SchemaMapper(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.schema_data = None
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Mapeador de Avro Schema")
+        self.setGeometry(100, 100, 600, 400)
+
+        self.layout = QVBoxLayout()
+
+        self.load_button = QPushButton("Carregar Schema")
+        self.load_button.clicked.connect(self.load_schema_file)
+        self.layout.addWidget(self.load_button)
+
+        self.field_label = QLabel("Nome do Campo:")
+        self.layout.addWidget(self.field_label)
+
+        self.field_input = QLineEdit()
+        self.layout.addWidget(self.field_input)
+
+        self.search_button = QPushButton("Buscar Campo")
+        self.search_button.clicked.connect(self.search_field)
+        self.layout.addWidget(self.search_button)
+
+        self.result_label = QLabel("")
+        self.layout.addWidget(self.result_label)
+
+        self.setLayout(self.layout)
+
+    def load_schema_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecione um arquivo Avro Schema", "", "Avro Schema Files (*.avsc);;Todos os Arquivos (*)")
+        if file_path:
+            try:
+                self.schema_data = load_schema(file_path)
+                QMessageBox.information(self, "Sucesso", "Schema carregado com sucesso!")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Falha ao carregar o schema: {str(e)}")
+
+    def search_field(self):
+        if not self.schema_data:
+            QMessageBox.warning(self, "Aviso", "Por favor, carregue um schema primeiro!")
+            return
+
+        target_field = self.field_input.text()
+        if not target_field:
+            QMessageBox.warning(self, "Aviso", "Por favor, insira o nome do campo!")
+            return
+
+        path = find_field_path(self.schema_data, target_field)
+        if path:
+            self.result_label.setText(f"Caminho: {path}")
+        else:
+            self.result_label.setText("Campo não encontrado.")
+
+
+if __name__ == "__main__":
+    import sys
+    app = QApplication(sys.argv)
+    window = SchemaMapper()
+    window.show()
+    sys.exit(app.exec_())
