@@ -1,0 +1,32 @@
+def find_field_path(schema, target_field, path=""):
+    """
+    Função recursiva para encontrar o caminho completo do campo no schema,
+    retornando o caminho simplificado baseado nos nomes dos campos.
+    """
+    if isinstance(schema, dict):
+        # Verifica se o schema é um campo diretamente
+        if schema.get("name") == target_field:
+            return path + f"['{schema['name']}']"
+
+        # Se o schema possui campos (fields), percorre-os
+        if "fields" in schema and isinstance(schema["fields"], list):
+            for field in schema["fields"]:
+                result = find_field_path(field, target_field, path + f"['{schema['name']}']" if "name" in schema else path)
+                if result:
+                    return result
+
+        # Para outros casos, percorre recursivamente
+        for key, value in schema.items():
+            if isinstance(value, (dict, list)):
+                result = find_field_path(value, target_field, path)
+                if result:
+                    return result
+
+    elif isinstance(schema, list):
+        # Se o schema for uma lista, percorre cada item
+        for item in schema:
+            result = find_field_path(item, target_field, path)
+            if result:
+                return result
+
+    return None
