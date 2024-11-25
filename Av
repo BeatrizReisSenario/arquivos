@@ -1,0 +1,33 @@
+import json
+
+def avro_to_json(avro_schema_path, output_json_path):
+    """
+    Lê um schema Avro e o converte para um esquema JSON.
+    
+    Args:
+        avro_schema_path (str): Caminho para o arquivo Avro Schema (.avsc).
+        output_json_path (str): Caminho onde o arquivo JSON será salvo.
+    """
+    try:
+        # Carregar o schema Avro
+        with open(avro_schema_path, 'r') as avro_file:
+            avro_schema = json.load(avro_file)
+
+        # Salvar o schema em formato JSON
+        with open(output_json_path, 'w') as json_file:
+            json.dump(avro_schema, json_file, indent=4)
+
+        print(f"Schema JSON gerado com sucesso em: {output_json_path}")
+    except Exception as e:
+        print(f"Erro ao converter o schema Avro para JSON: {str(e)}")
+
+
+if __name__ == "__main__":
+    # Caminho para o arquivo Avro Schema (.avsc)
+    avro_schema_file = "exemplo_schema.avsc"
+    
+    # Caminho para salvar o arquivo JSON gerado
+    output_json_file = "exemplo_schema.json"
+    
+    # Converter Avro Schema para JSON
+    avro_to_json(avro_schema_file, output_json_file)
