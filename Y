@@ -1,0 +1,80 @@
+import re
+import pandas as pd
+from PyPDF2 import PdfReader
+
+def extract_data_from_pdf(pdf_path):
+    # Lê o conteúdo do PDF
+    reader = PdfReader(pdf_path)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text()
+
+    # Regex para capturar as informações da tabela
+    pattern = r"(\d{2}/\d{2}/\d{4})\s+([\d.,]+)\s+([\d.,]+)\s+\d+\s+([\d.,]+)\s+\d+\s+([\d.,]+)"
+    matches = re.findall(pattern, text)
+
+    # Se não houver correspondências, exibir o texto para diagnóstico
+    if not matches:
+        print("Não foi possível encontrar os dados com a regex. Texto extraído:")
+        print(text)
+        return pd.DataFrame()
+
+    # Converter os dados extraídos para um DataFrame
+    data = []
+    for match in matches:
+        date, saldo_anterior, debito, credito, saldo_atual = match
+        data.append({
+            "Data": date,
+            "Saldo Anterior": float(saldo_anterior.replace(",", "").replace(".", "")),
+            "Débito": float(debito.replace(",", "").replace(".", "")),
+            "Crédito": float(credito.replace(",", "").replace(".", "")),
+            "Saldo Atual": float(saldo_atual.replace(",", "").replace(".", ""))
+        })
+
+    return pd.DataFrame(data)
+
+def check_account_balance(data):
+    if data.empty:
+        print("Nenhum dado disponível para verificação.")
+        return pd.DataFrame()
+
+    # Ordenar os dados pela data
+    data["Data"] = pd.to_datetime(data["Data"], format="%d/%m/%Y")
+    data.sort_values(by="Data", inplace=True)
+
+    # Verificar se as contas estão batendo
+    differences = []
+    for i in range(1, len(data)):
+        prev_row = data.iloc[i - 1]
+        curr_row = data.iloc[i]
+
+        # Verificar a regra: Débito = Saldo Anterior, Crédito = Saldo Atual
+        if curr_row["Débito"] != prev_row["Saldo Atual"] or curr_row["Crédito"] != curr_row["Saldo Atual"]:
+            diff = {
+                "Data": curr_row["Data"],
+                "Diferença Débito": curr_row["Débito"] - prev_row["Saldo Atual"],
+                "Diferença Crédito": curr_row["Crédito"] - curr_row["Saldo Atual"]
+            }
+            differences.append(diff)
+
+    return pd.DataFrame(differences)
+
+# Caminho para o PDF
+pdf_path = "caminho/para/seu_arquivo.pdf"
+
+# Extrair dados do PDF
+data = extract_data_from_pdf(pdf_path)
+
+# Diagnóstico inicial
+print("Dados extraídos:")
+print(data.head())
+
+# Verificar diferenças
+differences = check_account_balance(data)
+
+# Exibir resultados
+if not differences.empty:
+    print("Dias com diferenças encontradas:")
+    print(differences)
+else:
+    print("Todas as contas estão batendo.")
