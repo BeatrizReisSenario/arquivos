@@ -1,0 +1,61 @@
+import PyPDF2
+import pandas as pd
+
+def read_pdf(file_path):
+    # Ler o conteúdo do PDF
+    with open(file_path, "rb") as pdf_file:
+        reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text()
+    return text
+
+def parse_data(text):
+    # Extrair os dados do texto (assumindo formato conhecido)
+    lines = text.splitlines()
+    data = []
+    for line in lines:
+        if "Saldo Anterior" in line:
+            # Parsear os valores
+            date, saldo_anterior, debito, credito, saldo_atual = parse_line(line)
+            data.append({
+                "Data": date,
+                "Saldo Anterior": float(saldo_anterior),
+                "Débito": float(debito),
+                "Crédito": float(credito),
+                "Saldo Atual": float(saldo_atual)
+            })
+    return pd.DataFrame(data)
+
+def parse_line(line):
+    # Implementar lógica de parsing de linha específica do PDF
+    # Exemplo fictício:
+    parts = line.split()
+    date = parts[0]
+    saldo_anterior = parts[2]
+    debito = parts[4]
+    credito = parts[6]
+    saldo_atual = parts[8]
+    return date, saldo_anterior, debito, credito, saldo_atual
+
+def validate_account(df):
+    # Adicionar coluna de validação
+    df["Bateu"] = (df["Crédito"].shift(1) == df["Saldo Anterior"]) & (df["Saldo Atual"] == df["Crédito"])
+    df["Diferença"] = (df["Crédito"].shift(1) - df["Saldo Anterior"]) + (df["Saldo Atual"] - df["Crédito"])
+    return df
+
+def main(pdf_path):
+    text = read_pdf(pdf_path)
+    df = parse_data(text)
+    df = validate_account(df)
+    # Mostrar os dias com diferença
+    problemas = df[~df["Bateu"]]
+    if not problemas.empty:
+        print("Dias com problemas na conta:")
+        print(problemas[["Data", "Diferença"]])
+    else:
+        print("Todas as contas batem corretamente!")
+
+# Substituir pelo caminho do seu arquivo PDF
+pdf_path = "seu_arquivo.pdf"
+main(pdf_path)
