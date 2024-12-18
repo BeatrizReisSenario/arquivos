@@ -1,61 +1,73 @@
 import PyPDF2
 import pandas as pd
 
-def read_pdf(file_path):
-    # Ler o conteúdo do PDF
-    with open(file_path, "rb") as pdf_file:
-        reader = PyPDF2.PdfReader(pdf_file)
-        text = ""
+def extract_data_from_pdf(pdf_path):
+    # Lê o conteúdo do PDF
+    with open(pdf_path, 'rb') as file:
+        reader = PyPDF2.PdfReader(file)
+        text = ''
         for page in reader.pages:
             text += page.extract_text()
     return text
 
 def parse_data(text):
-    # Extrair os dados do texto (assumindo formato conhecido)
-    lines = text.splitlines()
+    # Converte o texto em uma estrutura de dados (supondo que o PDF tenha colunas formatadas)
+    lines = text.split('\n')
     data = []
     for line in lines:
-        if "Saldo Anterior" in line:
-            # Parsear os valores
-            date, saldo_anterior, debito, credito, saldo_atual = parse_line(line)
-            data.append({
-                "Data": date,
-                "Saldo Anterior": float(saldo_anterior),
-                "Débito": float(debito),
-                "Crédito": float(credito),
-                "Saldo Atual": float(saldo_atual)
-            })
+        parts = line.split()
+        if len(parts) == 7:  # A quantidade de colunas esperada
+            try:
+                data.append({
+                    'Data': parts[0],
+                    'Saldo Anterior': float(parts[1].replace(',', '')),
+                    'Débito': float(parts[2].replace(',', '')),
+                    'Qtd Débito': int(parts[3]),
+                    'Crédito': float(parts[4].replace(',', '')),
+                    'Qtd Crédito': int(parts[5]),
+                    'Saldo Atual': float(parts[6].replace(',', '')),
+                })
+            except ValueError:
+                pass  # Ignora linhas que não são numéricas
     return pd.DataFrame(data)
 
-def parse_line(line):
-    # Implementar lógica de parsing de linha específica do PDF
-    # Exemplo fictício:
-    parts = line.split()
-    date = parts[0]
-    saldo_anterior = parts[2]
-    debito = parts[4]
-    credito = parts[6]
-    saldo_atual = parts[8]
-    return date, saldo_anterior, debito, credito, saldo_atual
+def check_balance_consistency(df):
+    # Adiciona uma coluna de verificação
+    df['Diferença'] = 0.0
+    df['Consistência'] = True
+    for i in range(len(df) - 1):
+        # Verifica se o Débito do dia seguinte é igual ao Saldo Atual do dia anterior
+        if not (df.loc[i + 1, 'Débito'] == df.loc[i, 'Saldo Atual']):
+            df.loc[i + 1, 'Consistência'] = False
+            df.loc[i + 1, 'Diferença'] = df.loc[i + 1, 'Débito'] - df.loc[i, 'Saldo Atual']
 
-def validate_account(df):
-    # Adicionar coluna de validação
-    df["Bateu"] = (df["Crédito"].shift(1) == df["Saldo Anterior"]) & (df["Saldo Atual"] == df["Crédito"])
-    df["Diferença"] = (df["Crédito"].shift(1) - df["Saldo Anterior"]) + (df["Saldo Atual"] - df["Crédito"])
+        # Verifica se o Crédito do dia seguinte é igual ao Saldo Atual do mesmo dia
+        if not (df.loc[i, 'Crédito'] == df.loc[i, 'Saldo Atual']):
+            df.loc[i, 'Consistência'] = False
+            df.loc[i, 'Diferença'] += df.loc[i, 'Crédito'] - df.loc[i, 'Saldo Atual']
     return df
 
 def main(pdf_path):
-    text = read_pdf(pdf_path)
+    # Extrai texto do PDF
+    text = extract_data_from_pdf(pdf_path)
+    
+    # Converte texto em DataFrame
     df = parse_data(text)
-    df = validate_account(df)
-    # Mostrar os dias com diferença
-    problemas = df[~df["Bateu"]]
-    if not problemas.empty:
-        print("Dias com problemas na conta:")
-        print(problemas[["Data", "Diferença"]])
-    else:
-        print("Todas as contas batem corretamente!")
+    
+    # Verifica consistência da conta
+    df = check_balance_consistency(df)
+    
+    # Filtra os dias inconsistentes
+    inconsistencies = df[df['Consistência'] == False]
+    
+    # Exibe os resultados
+    print("Dias inconsistentes encontrados:")
+    print(inconsistencies[['Data', 'Débito', 'Crédito', 'Saldo Atual', 'Diferença']])
+    
+    # Salva inconsistências em CSV para análise
+    inconsistencies.to_csv('inconsistencias.csv', index=False)
+    print("\nResultados salvos em 'inconsistencias.csv'.")
 
-# Substituir pelo caminho do seu arquivo PDF
-pdf_path = "seu_arquivo.pdf"
+# Caminho para o arquivo PDF
+pdf_path = 'caminho_para_seu_arquivo.pdf'
 main(pdf_path)
